@@ -25,9 +25,13 @@ void LinBusListener::loop() {
   PollingComponent::loop();
 
   if (!this->check_for_lin_fault_()) {
+    // Drain all available bytes first to avoid false timeouts when loop was blocked
+    // Update timestamp before processing to ensure timeout checks use current time
     while (this->available()) {
-      this->read_lin_frame_();
+      // Update timestamp before reading to prevent false timeout on stale timestamp
+      // This handles the case where loop was blocked and data accumulated in buffer
       this->last_data_recieved_ = micros();
+      this->read_lin_frame_();
     }
   }
   
