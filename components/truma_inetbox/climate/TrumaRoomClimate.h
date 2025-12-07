@@ -3,6 +3,7 @@
 #include "esphome/components/climate/climate.h"
 #include "esphome/core/component.h"
 #include "esphome/components/truma_inetbox/TrumaiNetBoxApp.h"
+#include <set>
 
 namespace esphome {
   namespace truma_inetbox {
