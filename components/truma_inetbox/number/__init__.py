@@ -18,7 +18,7 @@ from esphome.const import (
 )
 from .. import truma_inetbox_ns, CONF_TRUMA_INETBOX_ID, TrumaINetBoxApp
 
-DEPENDENCIES = ["truma_inetbox"]
+DEPENDENCIES = ["truma_inetbox", "number"]
 CODEOWNERS = ["@Fabian-Schmidt"]
 
 CONF_CLASS = "class"
