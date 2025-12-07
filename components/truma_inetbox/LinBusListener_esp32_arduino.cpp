@@ -1,13 +1,6 @@
 #ifdef USE_ESP32_FRAMEWORK_ARDUINO
 #include "LinBusListener.h"
 #include "esphome/core/log.h"
-#ifdef CUSTOM_ESPHOME_UART
-#include "esphome/components/uart/truma_uart_component_esp32_arduino.h"
-#define ESPHOME_UART uart::truma_ESP32ArduinoUARTComponent
-#else
-#define ESPHOME_UART uart::ESP32ArduinoUARTComponent
-#endif // CUSTOM_ESPHOME_UART
-#include "esphome/components/uart/uart_component_esp32_arduino.h"
 
 namespace esphome {
 namespace truma_inetbox {
@@ -66,7 +59,5 @@ void LinBusListener::loop() {
 
 }  // namespace truma_inetbox
 }  // namespace esphome
-
-#undef ESPHOME_UART
 
 #endif  // USE_ESP32_FRAMEWORK_ARDUINO
