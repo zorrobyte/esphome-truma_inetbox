@@ -33,7 +33,7 @@ void LinBusListener::setup_framework() {
   uart_intr.rx_timeout_thresh =
       10;  // UART_TOUT_THRESH_DEFAULT,  //10 works well for my short messages I need send/receive
   uart_intr.txfifo_empty_intr_thresh = 10;  // UART_EMPTY_THRESH_DEFAULT
-  uart_intr_config(uart_num, &uart_intr);
+  uart_intr_config((uart_port_t)uart_num, &uart_intr);
 
   // Creating UART event Task
   xTaskCreatePinnedToCore(LinBusListener::uartEventTask_,
