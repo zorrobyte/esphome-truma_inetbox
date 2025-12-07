@@ -1,13 +1,14 @@
 #pragma once
 
-#include "enum.h"
+#include "TrumaNumberEnums.h"
 #include "esphome/components/number/number.h"
 #include "esphome/components/truma_inetbox/TrumaiNetBoxApp.h"
 
 namespace esphome {
 namespace truma_inetbox {
 
-class TrumaHeaterNumber : public Component, public number::Number, public Parented<TrumaiNetBoxApp> {
+
+class TrumaAirconManualNumber : public Component, public number::Number, public Parented<TrumaiNetBoxApp> {
  public:
   void setup() override;
   void dump_config() override;

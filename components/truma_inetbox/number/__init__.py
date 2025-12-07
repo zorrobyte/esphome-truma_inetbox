@@ -128,3 +128,4 @@ async def to_code(config):
     await cg.register_parented(var, config[CONF_TRUMA_INETBOX_ID])
 
     cg.add(var.set_type(CONF_SUPPORTED_TYPE[config[CONF_TYPE]][CONF_TYPE]))
+
