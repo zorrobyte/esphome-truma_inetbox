@@ -206,6 +206,9 @@ void LinBusListener::read_lin_frame_() {
     case READ_STATE_SYNC:
       // Second is Sync expected
       if (!this->read_byte(&buf) || buf != LIN_SYNC) {
+        if (this->debug_mode_) {
+          ESP_LOGD(TAG, "Invalid Sync Byte: %02X (Expected 0x55)", buf);
+        }
         log_msg.type = QUEUE_LOG_MSG_TYPE::VV_READ_LIN_FRAME_SYNC_EXPECTED;
         log_msg.current_PID = buf;
         TRUMA_LOGVV_ISR(log_msg);
@@ -242,6 +245,10 @@ void LinBusListener::read_lin_frame_() {
       auto current = micros();
       if (current > (this->last_data_recieved_ + this->time_per_first_byte_)) {
         // timeout occured.
+        if (this->debug_mode_) {
+          uint32_t delta = current - this->last_data_recieved_;
+          ESP_LOGD(TAG, "Frame Timeout! Resetting state. Delta: %lu us (threshold: %lu us)", delta, this->time_per_first_byte_);
+        }
         this->current_state_ = READ_STATE_BREAK;
         return;
       }
@@ -267,7 +274,12 @@ void LinBusListener::read_lin_frame_() {
 
     if (this->lin_checksum_ == LIN_CHECKSUM::LIN_CHECKSUM_VERSION_1 ||
         (this->current_PID_ == DIAGNOSTIC_FRAME_MASTER || this->current_PID_ == DIAGNOSTIC_FRAME_SLAVE)) {
-      if (data_CRC != data_checksum(this->current_data_, data_length, 0)) {
+      uint8_t calculated_CRC = data_checksum(this->current_data_, data_length, 0);
+      if (data_CRC != calculated_CRC) {
+        if (this->debug_mode_) {
+          ESP_LOGD(TAG, "LIN v1 Checksum Failure - PID: %02X, Received: %02X, Calculated: %02X", 
+                   this->current_PID_, data_CRC, calculated_CRC);
+        }
         log_msg.type = QUEUE_LOG_MSG_TYPE::WARN_READ_LIN_FRAME_LINv1_CRC;
         TRUMA_LOGW_ISR(log_msg);
         this->current_data_valid = false;
@@ -283,6 +295,10 @@ void LinBusListener::read_lin_frame_() {
       uint8_t data_CRC_master = data_checksum(this->current_data_, data_length, this->current_PID_);
       uint8_t data_CRC_slave = data_checksum(this->current_data_, data_length, this->current_PID_with_parity_);
       if (data_CRC != data_CRC_master && data_CRC != data_CRC_slave) {
+        if (this->debug_mode_) {
+          ESP_LOGD(TAG, "LIN v2 Checksum Failure - PID: %02X, Received: %02X, Calculated Master: %02X, Calculated Slave: %02X", 
+                   this->current_PID_, data_CRC, data_CRC_master, data_CRC_slave);
+        }
         log_msg.type = QUEUE_LOG_MSG_TYPE::WARN_READ_LIN_FRAME_LINv2_CRC;
         TRUMA_LOGW_ISR(log_msg);
         this->current_data_valid = false;
