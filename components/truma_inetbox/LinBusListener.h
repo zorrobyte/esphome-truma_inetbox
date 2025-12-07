@@ -39,6 +39,7 @@ class LinBusListener : public PollingComponent, public uart::UARTDevice {
 
   void dump_config() override;
   void setup() override;
+  void loop() override;
   void update() override;
 
   void set_lin_checksum(LIN_CHECKSUM val) { this->lin_checksum_ = val; }
