@@ -46,6 +46,7 @@ class LinBusListener : public PollingComponent, public uart::UARTDevice {
   void set_cs_pin(GPIOPin *pin) { this->cs_pin_ = pin; }
   void set_fault_pin(GPIOPin *pin) { this->fault_pin_ = pin; }
   void set_observer_mode(bool val) { this->observer_mode_ = val; }
+  void set_debug_mode(bool enable) { this->debug_mode_ = enable; }
   bool get_lin_bus_fault() { return fault_on_lin_bus_reported_ > 3; }
 
   void process_lin_msg_queue(TickType_t xTicksToWait);
@@ -61,6 +62,7 @@ class LinBusListener : public PollingComponent, public uart::UARTDevice {
   GPIOPin *cs_pin_ = nullptr;
   GPIOPin *fault_pin_ = nullptr;
   bool observer_mode_ = false;
+  bool debug_mode_{false};
 
   void write_lin_answer_(const uint8_t *data, uint8_t len);
   bool check_for_lin_fault_();

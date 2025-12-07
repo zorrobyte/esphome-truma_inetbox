@@ -36,6 +36,7 @@ CONF_TRUMA_INETBOX_ID = "truma_inetbox_id"
 CONF_LIN_CHECKSUM = "lin_checksum"
 CONF_FAULT_PIN = "fault_pin"
 CONF_OBSERVER_MODE = "observer_mode"
+CONF_DEBUG = "debug"
 CONF_NUMBER_OF_CHILDREN = "number_of_children"
 CONF_ON_HEATER_MESSAGE = "on_heater_message"
 
@@ -210,6 +211,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_CS_PIN): pins.gpio_output_pin_schema,
             cv.Optional(CONF_FAULT_PIN): pins.gpio_input_pin_schema,
             cv.Optional(CONF_OBSERVER_MODE): cv.boolean,
+            cv.Optional(CONF_DEBUG, default=False): cv.boolean,
             cv.Optional(CONF_ON_HEATER_MESSAGE): automation.validate_automation(
                 {
                     cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(TrumaiNetBoxAppHeaterMessageTrigger),
@@ -256,6 +258,9 @@ async def to_code(config):
 
     if CONF_OBSERVER_MODE in config:
         cg.add(var.set_observer_mode(config[CONF_OBSERVER_MODE]))
+
+    if CONF_DEBUG in config:
+        cg.add(var.set_debug_mode(config[CONF_DEBUG]))
 
     for conf in config.get(CONF_ON_HEATER_MESSAGE, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)

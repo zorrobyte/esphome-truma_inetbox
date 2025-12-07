@@ -31,6 +31,15 @@ void LinBusListener::loop() {
       // Update timestamp before reading to prevent false timeout on stale timestamp
       // This handles the case where loop was blocked and data accumulated in buffer
       this->last_data_recieved_ = micros();
+      
+      // Debug mode: peek at byte and log before processing
+      if (this->debug_mode_) {
+        uint8_t debug_byte;
+        if (this->peek_byte(&debug_byte)) {
+          ESP_LOGD(TAG, "RX: %02X", debug_byte);
+        }
+      }
+      
       this->read_lin_frame_();
     }
   }
