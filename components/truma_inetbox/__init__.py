@@ -29,7 +29,7 @@ from esphome.components.uart import (
 from esphome.core import CORE
 from .entity_helpers import count_id_usage
 
-DEPENDENCIES = ["uart"]
+DEPENDENCIES = ["uart", "number"]
 CODEOWNERS = ["@Fabian-Schmidt"]
 
 CONF_TRUMA_INETBOX_ID = "truma_inetbox_id"
