@@ -16,6 +16,9 @@ static const char *const TAG = "truma_inetbox.LinBusListener";
 
 void LinBusListener::setup_framework() {
   ESP_LOGI(TAG, "Using Polling Mode for ESP32 (Arduino 3.0)");
+  // Increase inter-byte timeout to 20ms to tolerate gaps at 9600 baud.
+  // Standard calculation is ~5.7ms which causes partial data errors with slow devices.
+  this->time_per_first_byte_ = 20000;
 }
 
 void LinBusListener::loop() {
