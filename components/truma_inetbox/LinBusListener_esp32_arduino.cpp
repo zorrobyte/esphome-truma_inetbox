@@ -25,9 +25,12 @@ void LinBusListener::loop() {
   PollingComponent::loop();
 
   if (!this->check_for_lin_fault_()) {
-    // Drain all available bytes first to avoid false timeouts when loop was blocked
-    // Update timestamp before processing to ensure timeout checks use current time
-    while (this->available()) {
+    // Drain up to 64 bytes to avoid blocking the main loop for too long
+    // This prevents WDT (Watchdog Timer) resets if the bus is flooded
+    int bytes_processed = 0;
+    const int MAX_BATCH_SIZE = 64;
+
+    while (this->available() && bytes_processed < MAX_BATCH_SIZE) {
       // Update timestamp before reading to prevent false timeout on stale timestamp
       // This handles the case where loop was blocked and data accumulated in buffer
       this->last_data_recieved_ = micros();
@@ -41,6 +44,7 @@ void LinBusListener::loop() {
       }
       
       this->read_lin_frame_();
+      bytes_processed++;
     }
   }
   
