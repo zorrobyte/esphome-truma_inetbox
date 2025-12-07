@@ -29,22 +29,34 @@ void LinBusListener::loop() {
     // This prevents WDT (Watchdog Timer) resets if the bus is flooded
     int bytes_processed = 0;
     const int MAX_BATCH_SIZE = 64;
+    
+    // Accumulate debug log to reduce serial spam
+    std::string debug_log_buffer;
+    if (this->debug_mode_) {
+      debug_log_buffer.reserve(MAX_BATCH_SIZE * 3);
+    }
 
     while (this->available() && bytes_processed < MAX_BATCH_SIZE) {
       // Update timestamp before reading to prevent false timeout on stale timestamp
       // This handles the case where loop was blocked and data accumulated in buffer
       this->last_data_recieved_ = micros();
       
-      // Debug mode: peek at byte and log before processing
+      // Debug mode: peek at byte and buffer it
       if (this->debug_mode_) {
         uint8_t debug_byte;
         if (this->peek_byte(&debug_byte)) {
-          ESP_LOGD(TAG, "RX: %02X", debug_byte);
+           char hex_buf[4];
+           sprintf(hex_buf, "%02X ", debug_byte);
+           debug_log_buffer += hex_buf;
         }
       }
       
       this->read_lin_frame_();
       bytes_processed++;
+    }
+    
+    if (this->debug_mode_ && !debug_log_buffer.empty()) {
+      ESP_LOGD(TAG, "RX Batch: %s", debug_log_buffer.c_str());
     }
   }
   
