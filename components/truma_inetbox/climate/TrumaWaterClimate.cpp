@@ -45,7 +45,9 @@ climate::ClimateTraits TrumaWaterClimate::traits() {
   // The capabilities of the climate device
   auto traits = climate::ClimateTraits();
   traits.set_supports_current_temperature(true);
-  traits.set_supported_modes(this->supported_modes_);
+  for (auto mode : this->supported_modes_) {
+    traits.add_supported_mode(mode);
+  }
   traits.set_visual_min_temperature(40);
   traits.set_visual_max_temperature(80);
   traits.set_visual_temperature_step(20);
