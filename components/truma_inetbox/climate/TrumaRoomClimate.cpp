@@ -130,7 +130,7 @@ void TrumaRoomClimate::control(const climate::ClimateCall &call) {
 climate::ClimateTraits TrumaRoomClimate::traits() {
   // The capabilities of the climate device
   auto traits = climate::ClimateTraits();
-  traits.set_supports_current_temperature(true);
+  traits.add_supported_feature(climate::CLIMATE_FEATURE_CURRENT_TEMPERATURE);
   for (auto mode : this->supported_modes_) {
     traits.add_supported_mode(mode);
   }
