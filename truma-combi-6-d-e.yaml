@@ -1,0 +1,274 @@
+esphome:
+  name: truma
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/simplenotezy/esphome-truma_inetbox
+      ref: feat/arduino_3
+    components: ["truma_inetbox"]
+    refresh: 0s
+
+# ---------------------------------------------------------
+# NETWORK SECTION
+# ---------------------------------------------------------
+wifi:
+  ssid: "Network Name"
+  password: !secret wifi_password
+
+  # Fallback hotspot if it can't reach "Network Name"
+  ap:
+    ssid: "Fallback Hotspot"
+    password: "Sw9g4XJtoyrn"
+
+api:
+
+ota:
+  platform: esphome
+  password: !secret wifi_password
+
+logger:
+  level: DEBUG
+
+web_server:
+  port: 80
+  local: true
+  version: 2
+  include_internal: true
+
+# ---------------------------------------------------------
+# HARDWARE SECTION
+# ---------------------------------------------------------
+uart:
+  - id: lin_uart_bus
+    tx_pin: 17
+    rx_pin: 16
+    baud_rate: 9600
+    data_bits: 8
+    parity: NONE
+    stop_bits: 2
+
+# ---------------------------------------------------------
+# TRUMA LOGIC
+# ---------------------------------------------------------
+
+truma_inetbox:
+  debug: false
+  uart_id: lin_uart_bus
+  on_heater_message:
+    then:
+      - logger.log: "Message from CP Plus received."
+
+# ---------------------------------------------------------
+# Devices/entites
+# ---------------------------------------------------------
+
+number:
+  - platform: truma_inetbox
+    name: "Target Room Temperature"
+    type: TARGET_ROOM_TEMPERATURE
+  - platform: truma_inetbox
+    name: "Target Water Temperature"
+    type: TARGET_WATER_TEMPERATURE
+  - platform: truma_inetbox
+    name: "Electric power level (W)"
+    type: ELECTRIC_POWER_LEVEL
+
+binary_sensor:
+  - platform: truma_inetbox
+    name: "CP Plus alive"
+    type: CP_PLUS_CONNECTED
+
+  - platform: truma_inetbox
+    name: "Room Heater active"
+    type: HEATER_ROOM
+    id: HEATER_ROOM
+
+  - platform: truma_inetbox
+    name: "Water Heater active"
+    type: HEATER_WATER
+    id: HEATER_WATER
+
+  - platform: truma_inetbox
+    name: "Heater mode Diesel only"
+    type: HEATER_GAS
+
+  - platform: truma_inetbox
+    name: "Heater mode Diesel + El1 (Mix 1)"
+    type: HEATER_MIX_1
+
+  - platform: truma_inetbox
+    name: "Heater mode Diesel + El2 (Mix 2)"
+    type: HEATER_MIX_2
+
+  - platform: truma_inetbox
+    name: "Heater mode El only"
+    type: HEATER_ELECTRICITY
+
+  - platform: truma_inetbox
+    name: "Heater has error"
+    type: HEATER_HAS_ERROR
+
+  - platform: truma_inetbox
+    name: "Timer active"
+    type: TIMER_ACTIVE
+    id: TIMER_ACTIVE
+
+  - platform: truma_inetbox
+    name: "Timer Room Heater active"
+    type: TIMER_ROOM
+
+  - platform: truma_inetbox
+    name: "Timer Water Heater active"
+    type: TIMER_WATER
+
+climate:
+  - platform: truma_inetbox
+    name: "Truma Room (Diesel/El)"
+    type: ROOM
+  - platform: truma_inetbox
+    name: "Truma Water"
+    type: WATER
+
+sensor:
+  - platform: truma_inetbox
+    name: "Current Room Temperature"
+    type: CURRENT_ROOM_TEMPERATURE
+
+  - platform: truma_inetbox
+    name: "Current Water Temperature"
+    type: CURRENT_WATER_TEMPERATURE
+
+  - platform: truma_inetbox
+    name: "Target Room Temperature (sensor)"
+    type: TARGET_ROOM_TEMPERATURE
+
+  - platform: truma_inetbox
+    name: "Target Water Temperature (sensor)"
+    type: TARGET_WATER_TEMPERATURE
+
+  - platform: truma_inetbox
+    name: "Heating mode"
+    type: HEATING_MODE
+
+  - platform: truma_inetbox
+    name: "Electric power level (sensor)"
+    type: ELECTRIC_POWER_LEVEL
+
+  - platform: truma_inetbox
+    name: "Energy mix"
+    type: ENERGY_MIX
+
+  - platform: truma_inetbox
+    name: "Operating status"
+    type: OPERATING_STATUS
+
+  - platform: truma_inetbox
+    name: "Heater error code"
+    type: HEATER_ERROR_CODE
+
+switch:
+  - platform: template
+    name: "Activate Room Heater"
+    lambda: |-
+      return id(HEATER_ROOM).state;
+    turn_on_action:
+      - truma_inetbox.heater.set_target_room_temperature:
+          temperature: !lambda |-
+            return 16;
+          heating_mode: ECO # CP Plus will map this appropriately for Combi 6 D E
+    turn_off_action:
+      - truma_inetbox.heater.set_target_room_temperature:
+          temperature: 0
+
+  - platform: template
+    name: "Activate Water Heater"
+    lambda: |-
+      return id(HEATER_WATER).state;
+    turn_on_action:
+      - truma_inetbox.heater.set_target_water_temperature:
+          temperature: 40
+    turn_off_action:
+      - truma_inetbox.heater.set_target_water_temperature:
+          temperature: 0
+
+  - platform: template
+    name: "Activate Water Heater (enum)"
+    lambda: |-
+      return id(HEATER_WATER).state;
+    turn_on_action:
+      - truma_inetbox.heater.set_target_water_temperature_enum:
+          temperature: ECO
+    turn_off_action:
+      - truma_inetbox.heater.set_target_water_temperature_enum: "OFF"
+
+  - platform: template
+    name: "Active Timer"
+    lambda: |-
+      return id(TIMER_ACTIVE).state;
+    turn_on_action:
+      - truma_inetbox.timer.activate:
+          start: 7:00
+          stop: 9:30
+          room_temperature: 13
+          heating_mode: ECO
+          water_temperature: 0
+          energy_mix: GAS # Diesel only
+          watt: 0
+    turn_off_action:
+      - truma_inetbox.timer.disable
+
+button:
+  - platform: template
+    name: "Energy mix DIESEL only"
+    on_press:
+      - truma_inetbox.heater.set_energy_mix:
+          energy_mix: GAS # mapped to Diesel on Combi 6 D E
+
+  - platform: template
+    name: "Energy mix DIESEL + EL1 (900W)"
+    on_press:
+      - truma_inetbox.heater.set_energy_mix:
+          energy_mix: MIX
+          watt: 900
+
+  - platform: template
+    name: "Energy mix DIESEL + EL2 (1800W)"
+    on_press:
+      - truma_inetbox.heater.set_energy_mix:
+          energy_mix: MIX
+          watt: 1800
+
+  - platform: template
+    name: "Energy mix EL only (900W)"
+    on_press:
+      - truma_inetbox.heater.set_energy_mix:
+          energy_mix: ELECTRICITY
+          watt: 900
+
+  - platform: template
+    name: "Energy mix EL only (1800W)"
+    on_press:
+      - truma_inetbox.heater.set_energy_mix:
+          energy_mix: ELECTRICITY
+          watt: 1800
+
+  - platform: template
+    name: "Set electric power level to 0 W"
+    on_press:
+      - truma_inetbox.heater.set_electric_power_level: 0
+
+  - platform: template
+    name: "Set electric power level to 900 W"
+    on_press:
+      - truma_inetbox.heater.set_electric_power_level: 900
+
+  - platform: template
+    name: "Set electric power level to 1800 W"
+    on_press:
+      - truma_inetbox.heater.set_electric_power_level: 1800
