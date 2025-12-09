@@ -37,7 +37,7 @@ ota:
   password: !secret wifi_password
 
 logger:
-  level: VERBOSE
+  level: DEBUG
 
 web_server:
   port: 80
@@ -62,7 +62,7 @@ uart:
 # ---------------------------------------------------------
 
 truma_inetbox:
-  debug: true
+  debug: false
   uart_id: lin_uart_bus
   on_heater_message:
     then:
@@ -79,9 +79,6 @@ number:
   - platform: truma_inetbox
     name: "Target Water Temperature"
     type: TARGET_WATER_TEMPERATURE
-  - platform: truma_inetbox
-    name: "Electric power level (W)"
-    type: ELECTRIC_POWER_LEVEL
 
 binary_sensor:
   - platform: truma_inetbox
@@ -163,6 +160,7 @@ sensor:
   - platform: truma_inetbox
     name: "Electric power level (sensor)"
     type: ELECTRIC_POWER_LEVEL
+    id: electric_power_level_sensor
 
   - platform: truma_inetbox
     name: "Energy mix"
@@ -227,52 +225,27 @@ switch:
     turn_off_action:
       - truma_inetbox.timer.disable
 
-button:
-  - platform: template
-    name: "Energy mix DIESEL only"
-    on_press:
-      - truma_inetbox.heater.set_energy_mix:
-          energy_mix: GAS # mapped to Diesel on Combi 6 D E
+select:
+  - platform: truma_inetbox
+    name: "Energy Mix"
+    type: HEATER_ENERGY_MIX_DIESEL
 
   - platform: template
-    name: "Energy mix DIESEL + EL1 (900W)"
-    on_press:
-      - truma_inetbox.heater.set_energy_mix:
-          energy_mix: MIX
-          watt: 900
-
-  - platform: template
-    name: "Energy mix DIESEL + EL2 (1800W)"
-    on_press:
-      - truma_inetbox.heater.set_energy_mix:
-          energy_mix: MIX
-          watt: 1800
-
-  - platform: template
-    name: "Energy mix EL only (900W)"
-    on_press:
-      - truma_inetbox.heater.set_energy_mix:
-          energy_mix: ELECTRICITY
-          watt: 900
-
-  - platform: template
-    name: "Energy mix EL only (1800W)"
-    on_press:
-      - truma_inetbox.heater.set_energy_mix:
-          energy_mix: ELECTRICITY
-          watt: 1800
-
-  - platform: template
-    name: "Set electric power level to 0 W"
-    on_press:
-      - truma_inetbox.heater.set_electric_power_level: 0
-
-  - platform: template
-    name: "Set electric power level to 900 W"
-    on_press:
-      - truma_inetbox.heater.set_electric_power_level: 900
-
-  - platform: template
-    name: "Set electric power level to 1800 W"
-    on_press:
-      - truma_inetbox.heater.set_electric_power_level: 1800
+    name: "Electric Power Level"
+    options:
+      - "0 W"
+      - "900 W"
+      - "1800 W"
+    lambda: |-
+      if (id(electric_power_level_sensor).state == 900) {
+        return std::string("900 W");
+      } else if (id(electric_power_level_sensor).state == 1800) {
+        return std::string("1800 W");
+      }
+      return std::string("0 W");
+    set_action:
+      - truma_inetbox.heater.set_electric_power_level:
+          watt: !lambda |-
+            if (x == "900 W") return 900;
+            if (x == "1800 W") return 1800;
+            return 0;
