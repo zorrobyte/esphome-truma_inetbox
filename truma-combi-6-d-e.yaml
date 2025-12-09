@@ -96,22 +96,6 @@ binary_sensor:
     id: HEATER_WATER
 
   - platform: truma_inetbox
-    name: "Heater mode Diesel only"
-    type: HEATER_GAS
-
-  - platform: truma_inetbox
-    name: "Heater mode Diesel + El1 (Mix 1)"
-    type: HEATER_MIX_1
-
-  - platform: truma_inetbox
-    name: "Heater mode Diesel + El2 (Mix 2)"
-    type: HEATER_MIX_2
-
-  - platform: truma_inetbox
-    name: "Heater mode El only"
-    type: HEATER_ELECTRICITY
-
-  - platform: truma_inetbox
     name: "Heater has error"
     type: HEATER_HAS_ERROR
 
@@ -165,14 +149,70 @@ sensor:
   - platform: truma_inetbox
     name: "Energy mix"
     type: ENERGY_MIX
+    id: energy_mix_sensor
 
   - platform: truma_inetbox
-    name: "Operating status"
+    name: "Operating status (raw)"
     type: OPERATING_STATUS
+    id: operating_status_raw
 
   - platform: truma_inetbox
     name: "Heater error code"
     type: HEATER_ERROR_CODE
+
+text_sensor:
+  - platform: template
+    name: "Heater Energy Mode"
+    update_interval: 5s
+    lambda: |-
+      int mix = (int)id(energy_mix_sensor).state;
+      int power = (int)id(electric_power_level_sensor).state;
+
+      // Values from EnergyMix enum in TrumaEnums.h:
+      // ENERGY_MIX_NONE = 0
+      // ENERGY_MIX_GAS = 1 (also DIESEL)
+      // ENERGY_MIX_ELECTRICITY = 2
+      // ENERGY_MIX_MIX = 3
+
+      if (std::isnan(id(energy_mix_sensor).state)) return {"N/A"};
+
+      if (mix == 0) return {"OFF"};
+      if (mix == 1) return {"DIESEL"};
+
+      if (mix == 2) { // ELECTRICITY
+         if (power == 900) return {"EL_1"};
+         if (power == 1800) return {"EL_2"};
+         // It might report 0W temporarily when switching or off
+         return {"EL_0"};
+      }
+
+      if (mix == 3) { // MIX
+         if (power == 900) return {"MIX_1"};
+         if (power == 1800) return {"MIX_2"};
+         return {"MIX_0"};
+      }
+
+      return {"UNKNOWN"};
+
+  - platform: template
+    name: "Operating Status"
+    update_interval: 5s
+    lambda: |-
+      int status = (int)id(operating_status_raw).state;
+
+      if (std::isnan(id(operating_status_raw).state)) return {"N/A"};
+
+      switch (status) {
+        case 0: return {"OFF"};
+        case 1: return {"WARNING"};
+        case 4: return {"START_OR_COOL_DOWN"};
+        case 5: return {"ON (Stage 5)"};
+        case 6: return {"ON (Stage 6)"};
+        case 7: return {"ON (Stage 7)"};
+        case 8: return {"ON (Stage 8)"};
+        case 9: return {"ON (Stage 9)"};
+        default: return {"UNKNOWN (" + std::to_string(status) + ")"};
+      }
 
 switch:
   - platform: template
