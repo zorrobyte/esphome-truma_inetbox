@@ -31,7 +31,7 @@ void LinBusListener::setup_framework() {
   // If not it will wait either until fifo is filled or a certain time has passed.
   uart_intr_config_t uart_intr;
   uart_intr.intr_enable_mask =
-      UART_RXFIFO_FULL_INT_ENA_M | UART_RXFIFO_TOUT_INT_ENA_M;  // only these IRQs - no BREAK, PARITY or OVERFLOW
+      UART_RXFIFO_FULL_INT_ENA_M | UART_RXFIFO_TOUT_INT_ENA_M | UART_BRK_DET_INT_ENA_M | UART_FRM_ERR_INT_ENA_M;
   // UART_RXFIFO_FULL_INT_ENA_M | UART_RXFIFO_TOUT_INT_ENA_M | UART_FRM_ERR_INT_ENA_M |
   // UART_RXFIFO_OVF_INT_ENA_M | UART_BRK_DET_INT_ENA_M | UART_PARITY_ERR_INT_ENA_M;
   uart_intr.rxfifo_full_thresh =
@@ -45,7 +45,7 @@ void LinBusListener::setup_framework() {
   hw_serial->onReceiveError([this](hardwareSerial_error_t val) {
     // Ignore any data present in buffer
     this->clear_uart_buffer_();
-    if (val == UART_BREAK_ERROR) {
+    if (val == UART_BREAK_ERROR || val == UART_FRAME_ERROR) {
       // If the break is valid the `onReceive` is called first and the break is handeld. Therfore the expectation is
       // that the state should be in waiting for `SYNC`.
       if (this->current_state_ != READ_STATE_SYNC) {
