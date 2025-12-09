@@ -22,7 +22,7 @@ external_components:
 # NETWORK SECTION
 # ---------------------------------------------------------
 wifi:
-  ssid: "Network Name"
+  ssid: !secret wifi_ssid
   password: !secret wifi_password
 
   # Fallback hotspot if it can't reach "Network Name"
