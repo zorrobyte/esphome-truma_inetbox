@@ -289,6 +289,31 @@ void LinBusListener::read_lin_frame_() {
         }
 
         if (!recovered) {
+            // Check for frame collision: PID 0x3D with no response, next frame merged in
+            // Pattern: 00 55 [PID] [data...]
+            if (this->current_PID_ == DIAGNOSTIC_FRAME_SLAVE && 
+                this->current_data_count_ >= 3 && 
+                this->current_data_[0] == 0x00 && 
+                this->current_data_[1] == 0x55) {
+                
+                // Validate the suspected new PID (current_data_[2]) has correct parity
+                uint8_t suspected_pid_with_parity = this->current_data_[2];
+                uint8_t suspected_pid = suspected_pid_with_parity & 0x3F;
+                uint8_t expected_parity = addr_parity(suspected_pid);
+                
+                if (suspected_pid_with_parity == (suspected_pid | (expected_parity << 6))) {
+                    // Valid PID found - this is a merged frame. Log and ignore the 0x3D (it was empty)
+                    if (this->debug_mode_) {
+                        ESP_LOGD(TAG, "PID 0x3D empty response detected, next frame (PID 0x%02X) merged. Ignoring merged data.", suspected_pid);
+                    }
+                    // Mark as valid so we don't log CRC error - the 0x3D frame was legitimately empty
+                    this->current_data_valid = true;
+                    // Don't process this garbage data
+                    this->current_state_ = READ_STATE_BREAK;
+                    return;
+                }
+            }
+            
             if (this->debug_mode_) {
               ESP_LOGD(TAG, "LIN v1 Checksum Failure - PID: %02X, Received: %02X, Calculated: %02X", 
                        this->current_PID_, data_CRC, calculated_CRC);
