@@ -17,7 +17,7 @@ namespace truma_inetbox {
 
 static const char *const TAG = "truma_inetbox.LinBusListener";
 
-#define QUEUE_WAIT_BLOCKING (portTickType) portMAX_DELAY
+#define QUEUE_WAIT_BLOCKING (TickType_t) portMAX_DELAY
 
 void LinBusListener::setup_framework() {
   auto uartComp = static_cast<ESPHOME_UART *>(this->parent_);
@@ -39,17 +39,17 @@ void LinBusListener::setup_framework() {
   uart_intr.rx_timeout_thresh =
       10;  // UART_TOUT_THRESH_DEFAULT,  //10 works well for my short messages I need send/receive
   uart_intr.txfifo_empty_intr_thresh = 10;  // UART_EMPTY_THRESH_DEFAULT
-  uart_intr_config(uart_num, &uart_intr);
+  uart_intr_config((uart_port_t) uart_num, &uart_intr);
 
   hw_serial->onReceive([this]() { this->onReceive_(); }, false);
   hw_serial->onReceiveError([this](hardwareSerial_error_t val) {
     // Ignore any data present in buffer
-    this->clear_uart_buffer_();
+    // this->clear_uart_buffer_();
     if (val == UART_BREAK_ERROR || val == UART_FRAME_ERROR) {
       // If the break is valid the `onReceive` is called first and the break is handeld. Therfore the expectation is
       // that the state should be in waiting for `SYNC`.
       if (this->current_state_ != READ_STATE_SYNC) {
-        this->current_state_ = READ_STATE_BREAK;
+        this->current_state_ = READ_STATE_SYNC;
       }
       return;
     }

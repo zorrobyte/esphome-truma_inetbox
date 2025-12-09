@@ -70,6 +70,10 @@ void LinBusListener::setup() {
   }
 }
 
+void LinBusListener::loop() {
+  PollingComponent::loop();
+}
+
 void LinBusListener::update() { this->check_for_lin_fault_(); }
 
 void LinBusListener::write_lin_answer_(const uint8_t *data, uint8_t len) {
