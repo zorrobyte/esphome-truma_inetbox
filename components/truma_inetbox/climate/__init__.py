@@ -19,6 +19,9 @@ CLIMATE_MODES = {
     "OFF": ClimateMode.CLIMATE_MODE_OFF,
     "HEAT": ClimateMode.CLIMATE_MODE_HEAT,
     "AUTO": ClimateMode.CLIMATE_MODE_AUTO,
+    "COOL": ClimateMode.CLIMATE_MODE_COOL,
+    "HEAT_COOL": ClimateMode.CLIMATE_MODE_HEAT_COOL,
+    "FAN_ONLY": ClimateMode.CLIMATE_MODE_FAN_ONLY,
 }
 CLIMATE_VISUAL_SCHEMA = cv.Schema({
     cv.Optional(CONF_TARGET_TEMPERATURE, default={}): cv.Schema({
@@ -38,13 +41,38 @@ TrumaClimate = truma_inetbox_ns.class_(
 CONF_SUPPORTED_TYPE = {
     "ROOM": truma_inetbox_ns.class_("TrumaRoomClimate", climate.Climate, cg.Component),
     "WATER": truma_inetbox_ns.class_("TrumaWaterClimate", climate.Climate, cg.Component),
+    "AIRCON": truma_inetbox_ns.class_("TrumaAirconClimate", climate.Climate, cg.Component),
+}
+
+
+CONF_TYPE_DEFAULTS = {
+    "ROOM": {
+        "supported_modes": ["OFF", "HEAT"],
+        "name": "Truma Room Climate",
+    },
+    "WATER": {
+        "supported_modes": ["OFF", "HEAT"],
+        "name": "Truma Water Climate",
+    },
+    "AIRCON": {
+        "supported_modes": ["OFF", "COOL", "HEAT", "HEAT_COOL", "FAN_ONLY"],
+        "name": "Truma Aircon Climate",
+    },
 }
 
 
 def set_default_based_on_type():
     def set_defaults_(config):
         # update the class
-        config[CONF_ID].type = CONF_SUPPORTED_TYPE[config[CONF_TYPE]]
+        type_key = config[CONF_TYPE].upper()
+        config[CONF_ID].type = CONF_SUPPORTED_TYPE[type_key]
+
+        # Set type-specific defaults if not already set
+        type_defaults = CONF_TYPE_DEFAULTS.get(type_key, {})
+        if "supported_modes" not in config or config["supported_modes"] == ["OFF", "HEAT"]:
+            if "supported_modes" in type_defaults:
+                config["supported_modes"] = type_defaults["supported_modes"]
+
         return config
 
     return set_defaults_
@@ -57,7 +85,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Required(CONF_TYPE): cv.enum(CONF_SUPPORTED_TYPE, upper=True),
         cv.Optional(CONF_NAME, default="Truma Climate"): cv.string,
         cv.Optional("preset"): cv.All(cv.ensure_list(cv.string)),  # If you want presets
-        cv.Optional("supported_modes", default=["OFF", "HEAT"]): cv.ensure_list(cv.enum(CLIMATE_MODES, upper=True)),
+        cv.Optional("supported_modes"): cv.ensure_list(cv.enum(CLIMATE_MODES, upper=True)),
     }).extend(cv.COMPONENT_SCHEMA).extend({
         cv.Optional("disabled_by_default", default=False): cv.boolean,
         cv.Optional("entity_category"): cv.entity_category,
@@ -75,14 +103,11 @@ async def to_code(config):
     await climate.register_climate(var, config)
     await cg.register_parented(var, config[CONF_TRUMA_INETBOX_ID])
 
-    # Optional visual settings
-    #if "visual" in config:
-    #    visual = config["visual"]
-    #    cg.add(var.set_visual_min_temperature(visual["min_temperature"]))
-    #    cg.add(var.set_visual_max_temperature(visual["max_temperature"]))
-    #    cg.add(var.set_visual_temperature_step(visual["temperature_step"]))
+    # Get type-specific defaults
+    type_key = config[CONF_TYPE].upper()
+    type_defaults = CONF_TYPE_DEFAULTS.get(type_key, {})
 
-    # Optional supported modes
-    if "supported_modes" in config:
-        modes = [CLIMATE_MODES[m] for m in config["supported_modes"]]
-        cg.add(var.set_supported_modes(modes))
+    # Supported modes
+    supported_modes = config.get("supported_modes", type_defaults.get("supported_modes", ["OFF", "HEAT"]))
+    modes = [CLIMATE_MODES[m] for m in supported_modes]
+    cg.add(var.set_supported_modes(modes))

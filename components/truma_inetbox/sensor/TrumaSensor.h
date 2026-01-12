@@ -17,6 +17,11 @@ enum class TRUMA_SENSOR_TYPE {
   ENERGY_MIX,
   OPERATING_STATUS,
   HEATER_ERROR_CODE,
+  // Aircon sensors
+  AIRCON_TARGET_TEMPERATURE,
+  AIRCON_CURRENT_TEMPERATURE,
+  AIRCON_MODE,
+  AIRCON_VENT_MODE,
 };
 
 #ifdef ESPHOME_LOG_HAS_CONFIG
@@ -48,6 +53,18 @@ static const char *enum_to_c_str(const TRUMA_SENSOR_TYPE val) {
       break;
     case TRUMA_SENSOR_TYPE::HEATER_ERROR_CODE:
       return "HEATER_ERROR_CODE";
+      break;
+    case TRUMA_SENSOR_TYPE::AIRCON_TARGET_TEMPERATURE:
+      return "AIRCON_TARGET_TEMPERATURE";
+      break;
+    case TRUMA_SENSOR_TYPE::AIRCON_CURRENT_TEMPERATURE:
+      return "AIRCON_CURRENT_TEMPERATURE";
+      break;
+    case TRUMA_SENSOR_TYPE::AIRCON_MODE:
+      return "AIRCON_MODE";
+      break;
+    case TRUMA_SENSOR_TYPE::AIRCON_VENT_MODE:
+      return "AIRCON_VENT_MODE";
       break;
     default:
       return "";

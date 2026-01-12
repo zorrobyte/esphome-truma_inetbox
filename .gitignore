@@ -7,3 +7,6 @@
 **/__pycache__/**
 
 /local_*
+
+# Reference repositories
+/inetbox2mqtt_ref/

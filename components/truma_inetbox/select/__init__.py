@@ -48,6 +48,19 @@ CONF_SUPPORTED_TYPE = {
         CONF_ICON: ICON_THERMOMETER,
         CONF_OPTIONS: ("Diesel", "Mix 1", "Mix 2", "Electric 1", "Electric 2"),
     },
+    # Aircon selects
+    "AIRCON_MODE": {
+        CONF_CLASS: truma_inetbox_ns.class_("TrumaAirconSelect", select.Select, cg.Component),
+        CONF_TYPE: TRUMA_SELECT_TYPE_dummy_ns.AIRCON_MODE,
+        CONF_ICON: "mdi:air-conditioner",
+        CONF_OPTIONS: ("Off", "Ventilation", "Cooling", "Heating", "Auto"),
+    },
+    "AIRCON_VENT_MODE": {
+        CONF_CLASS: truma_inetbox_ns.class_("TrumaAirconSelect", select.Select, cg.Component),
+        CONF_TYPE: TRUMA_SELECT_TYPE_dummy_ns.AIRCON_VENT_MODE,
+        CONF_ICON: "mdi:fan",
+        CONF_OPTIONS: ("Low", "Mid", "High", "Night", "Auto"),
+    },
 }
 
 

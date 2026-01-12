@@ -172,10 +172,24 @@ enum class TRUMA_DEVICE_STATE : uint8_t {
 };
 
 enum class AirconMode : uint8_t {
-  // Auto - 18 to 25
+  AIRCON_MODE_OFF = 0x00,
+  AIRCON_MODE_VENTILATION = 0x04,
+  AIRCON_MODE_COOLING = 0x05,
+  AIRCON_MODE_HEATING = 0x06,
+  AIRCON_MODE_AUTO = 0x07,
+
+  // Legacy aliases for backwards compatibility
   OFF = 0x00,
   AC_VENTILATION = 0x04,
   AC_COOLING = 0x05,
+};
+
+enum class AirconVentMode : uint8_t {
+  AIRCON_VENT_LOW = 0x71,
+  AIRCON_VENT_MID = 0x72,
+  AIRCON_VENT_HIGH = 0x73,
+  AIRCON_VENT_NIGHT = 0x74,
+  AIRCON_VENT_AUTO = 0x77,
 };
 
 enum class AirconOperation : uint8_t {

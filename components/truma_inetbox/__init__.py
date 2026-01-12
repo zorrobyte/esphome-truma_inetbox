@@ -291,6 +291,12 @@ HeaterEnergyMixAction = truma_inetbox_ns.class_(
     "HeaterEnergyMixAction", automation.Action)
 AirconManualTempAction = truma_inetbox_ns.class_(
     "AirconManualTempAction", automation.Action)
+AirconManualModeAction = truma_inetbox_ns.class_(
+    "AirconManualModeAction", automation.Action)
+AirconManualVentModeAction = truma_inetbox_ns.class_(
+    "AirconManualVentModeAction", automation.Action)
+AirconManualAction = truma_inetbox_ns.class_(
+    "AirconManualAction", automation.Action)
 TimerDisableAction = truma_inetbox_ns.class_(
     "TimerDisableAction", automation.Action)
 TimerActivateAction = truma_inetbox_ns.class_(
@@ -348,6 +354,35 @@ CONF_SUPPORTED_WATER_TEMPERATURE = {
     "HIGH": TargetTemp_dummy_ns.TARGET_TEMP_WATER_HIGH,
     "BOOST": TargetTemp_dummy_ns.TARGET_TEMP_WATER_BOOST,
 }
+
+# `AirconMode` is a enum class and not a namespace but it works.
+AirconMode_dummy_ns = truma_inetbox_ns.namespace("AirconMode")
+
+CONF_SUPPORTED_AIRCON_MODE = {
+    "OFF": AirconMode_dummy_ns.AIRCON_MODE_OFF,
+    "VENTILATION": AirconMode_dummy_ns.AIRCON_MODE_VENTILATION,
+    "VENT": AirconMode_dummy_ns.AIRCON_MODE_VENTILATION,
+    "COOLING": AirconMode_dummy_ns.AIRCON_MODE_COOLING,
+    "COOL": AirconMode_dummy_ns.AIRCON_MODE_COOLING,
+    "HEATING": AirconMode_dummy_ns.AIRCON_MODE_HEATING,
+    "HEAT": AirconMode_dummy_ns.AIRCON_MODE_HEATING,
+    "AUTO": AirconMode_dummy_ns.AIRCON_MODE_AUTO,
+}
+
+# `AirconVentMode` is a enum class and not a namespace but it works.
+AirconVentMode_dummy_ns = truma_inetbox_ns.namespace("AirconVentMode")
+
+CONF_SUPPORTED_AIRCON_VENT_MODE = {
+    "LOW": AirconVentMode_dummy_ns.AIRCON_VENT_LOW,
+    "MID": AirconVentMode_dummy_ns.AIRCON_VENT_MID,
+    "MEDIUM": AirconVentMode_dummy_ns.AIRCON_VENT_MID,
+    "HIGH": AirconVentMode_dummy_ns.AIRCON_VENT_HIGH,
+    "NIGHT": AirconVentMode_dummy_ns.AIRCON_VENT_NIGHT,
+    "AUTO": AirconVentMode_dummy_ns.AIRCON_VENT_AUTO,
+}
+
+CONF_AIRCON_MODE = "mode"
+CONF_AIRCON_VENT_MODE = "vent_mode"
 
 
 @automation.register_action(
@@ -479,6 +514,76 @@ async def truma_inetbox_aircon_manual_set_target_temperature_to_code(config, act
 
     template_ = await cg.templatable(config[CONF_TEMPERATURE], args, cg.uint8)
     cg.add(var.set_temperature(template_))
+
+    return var
+
+
+@automation.register_action(
+    "truma_inetbox.aircon.manual.set_mode",
+    AirconManualModeAction,
+    automation.maybe_conf(
+        CONF_AIRCON_MODE,
+        {
+            cv.GenerateID(): cv.use_id(TrumaINetBoxApp),
+            cv.Required(CONF_AIRCON_MODE): cv.templatable(cv.enum(CONF_SUPPORTED_AIRCON_MODE, upper=True)),
+        }
+    ),
+)
+async def truma_inetbox_aircon_manual_set_mode_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+
+    template_ = await cg.templatable(config[CONF_AIRCON_MODE], args, cg.uint8)
+    cg.add(var.set_mode(template_))
+
+    return var
+
+
+@automation.register_action(
+    "truma_inetbox.aircon.manual.set_vent_mode",
+    AirconManualVentModeAction,
+    automation.maybe_conf(
+        CONF_AIRCON_VENT_MODE,
+        {
+            cv.GenerateID(): cv.use_id(TrumaINetBoxApp),
+            cv.Required(CONF_AIRCON_VENT_MODE): cv.templatable(cv.enum(CONF_SUPPORTED_AIRCON_VENT_MODE, upper=True)),
+        }
+    ),
+)
+async def truma_inetbox_aircon_manual_set_vent_mode_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+
+    template_ = await cg.templatable(config[CONF_AIRCON_VENT_MODE], args, cg.uint8)
+    cg.add(var.set_vent_mode(template_))
+
+    return var
+
+
+@automation.register_action(
+    "truma_inetbox.aircon.manual.set",
+    AirconManualAction,
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(TrumaINetBoxApp),
+            cv.Optional(CONF_TEMPERATURE, default=22): cv.templatable(cv.int_range(min=0, max=31)),
+            cv.Optional(CONF_AIRCON_MODE, default="OFF"): cv.templatable(cv.enum(CONF_SUPPORTED_AIRCON_MODE, upper=True)),
+            cv.Optional(CONF_AIRCON_VENT_MODE, default="LOW"): cv.templatable(cv.enum(CONF_SUPPORTED_AIRCON_VENT_MODE, upper=True)),
+        }
+    ),
+)
+async def truma_inetbox_aircon_manual_set_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+
+    template_ = await cg.templatable(config[CONF_TEMPERATURE], args, cg.uint8)
+    cg.add(var.set_temperature(template_))
+
+    template_ = await cg.templatable(config[CONF_AIRCON_MODE], args, cg.uint8)
+    cg.add(var.set_mode(template_))
+
+    template_ = await cg.templatable(config[CONF_AIRCON_VENT_MODE], args, cg.uint8)
+    cg.add(var.set_vent_mode(template_))
 
     return var
 

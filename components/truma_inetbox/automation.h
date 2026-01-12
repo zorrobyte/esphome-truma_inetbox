@@ -65,6 +65,38 @@ template<typename... Ts> class AirconManualTempAction : public Action<Ts...>, pu
   }
 };
 
+template<typename... Ts> class AirconManualModeAction : public Action<Ts...>, public Parented<TrumaiNetBoxApp> {
+ public:
+  TEMPLATABLE_VALUE(AirconMode, mode)
+
+  void play(const Ts &...x) override {
+    this->parent_->get_aircon_manual()->action_set_mode(this->mode_.value_or(x..., AirconMode::AIRCON_MODE_OFF));
+  }
+};
+
+template<typename... Ts> class AirconManualVentModeAction : public Action<Ts...>, public Parented<TrumaiNetBoxApp> {
+ public:
+  TEMPLATABLE_VALUE(AirconVentMode, vent_mode)
+
+  void play(const Ts &...x) override {
+    this->parent_->get_aircon_manual()->action_set_vent_mode(
+        this->vent_mode_.value_or(x..., AirconVentMode::AIRCON_VENT_LOW));
+  }
+};
+
+template<typename... Ts> class AirconManualAction : public Action<Ts...>, public Parented<TrumaiNetBoxApp> {
+ public:
+  TEMPLATABLE_VALUE(uint8_t, temperature)
+  TEMPLATABLE_VALUE(AirconMode, mode)
+  TEMPLATABLE_VALUE(AirconVentMode, vent_mode)
+
+  void play(const Ts &...x) override {
+    this->parent_->get_aircon_manual()->action_aircon_manual(
+        this->temperature_.value_or(x..., 22), this->mode_.value_or(x..., AirconMode::AIRCON_MODE_OFF),
+        this->vent_mode_.value_or(x..., AirconVentMode::AIRCON_VENT_LOW));
+  }
+};
+
 template<typename... Ts> class TimerDisableAction : public Action<Ts...>, public Parented<TrumaiNetBoxApp> {
  public:
   void play(const Ts &...x) override { this->parent_->get_timer()->action_timer_disable(); }
@@ -100,6 +132,14 @@ class TrumaiNetBoxAppHeaterMessageTrigger : public Trigger<const StatusFrameHeat
  public:
   explicit TrumaiNetBoxAppHeaterMessageTrigger(TrumaiNetBoxApp *parent) {
     parent->get_heater()->add_on_message_callback([this](const StatusFrameHeater *message) { this->trigger(message); });
+  }
+};
+
+class TrumaiNetBoxAppAirconManualMessageTrigger : public Trigger<const StatusFrameAirconManual *> {
+ public:
+  explicit TrumaiNetBoxAppAirconManualMessageTrigger(TrumaiNetBoxApp *parent) {
+    parent->get_aircon_manual()->add_on_message_callback(
+        [this](const StatusFrameAirconManual *message) { this->trigger(message); });
   }
 };
 

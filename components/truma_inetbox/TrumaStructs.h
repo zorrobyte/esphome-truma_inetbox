@@ -180,12 +180,11 @@ struct StatusFrameDevice {  // NOLINT(altera-struct-pack-align)
 } __attribute__((packed));
 
 // Length 18 (0x12)
-// TODO
 struct StatusFrameAirconManual {  // NOLINT(altera-struct-pack-align)
-  AirconMode mode;
+  AirconMode mode;               // Operating mode: off/vent/cool/hot/auto
   // 0x00
   uint8_t unknown_02;
-  AirconOperation operation;
+  AirconVentMode vent_mode;      // Fan speed: low/mid/high/night/auto
   EnergyMix energy_mix;
   TargetTemp target_temp_aircon;
   // 0x00
@@ -207,20 +206,19 @@ struct StatusFrameAirconManual {  // NOLINT(altera-struct-pack-align)
 } __attribute__((packed));
 
 struct StatusFrameAirconManualResponse {  // NOLINT(altera-struct-pack-align)
-  AirconMode mode;
+  AirconMode mode;               // Operating mode: off/vent/cool/hot/auto
   // 0x00
   uint8_t unknown_02;
-  AirconOperation operation;
+  AirconVentMode vent_mode;      // Fan speed: low/mid/high/night/auto
   EnergyMix energy_mix;
   TargetTemp target_temp_aircon;
 } __attribute__((packed));
 
 // Length 22 (0x16)
-// TODO
 struct StatusFrameAirconManualInit {  // NOLINT(altera-struct-pack-align)
   uint8_t unknown_01;                // 0x00
   uint8_t unknown_02;                // 0x00
-  AirconOperation operation;
+  AirconVentMode vent_mode;
   EnergyMix energy_mix;
   uint8_t unknown_05;  // 0x00
   uint8_t unknown_06;  // 0x00

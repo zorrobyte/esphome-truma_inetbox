@@ -25,3 +25,16 @@
   - platform: truma_inetbox
     name: "Heater error code"
     type: HEATER_ERROR_CODE
+  # Aircon sensors
+  - platform: truma_inetbox
+    name: "Aircon Target Temperature"
+    type: AIRCON_TARGET_TEMPERATURE
+  - platform: truma_inetbox
+    name: "Aircon Current Temperature"
+    type: AIRCON_CURRENT_TEMPERATURE
+  - platform: truma_inetbox
+    name: "Aircon Mode"
+    type: AIRCON_MODE
+  - platform: truma_inetbox
+    name: "Aircon Vent Mode"
+    type: AIRCON_VENT_MODE

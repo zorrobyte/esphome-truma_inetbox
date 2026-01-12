@@ -18,7 +18,7 @@ StatusFrameAirconManualResponse *TrumaiNetBoxAppAirconManual::update_prepare() {
   // prepare status response
   this->update_status_ = {};
   this->update_status_.mode = this->data_.mode;
-  this->update_status_.operation = this->data_.operation;
+  this->update_status_.vent_mode = this->data_.vent_mode;
   this->update_status_.energy_mix = this->data_.energy_mix;
   this->update_status_.target_temp_aircon = this->data_.target_temp_aircon;
 
@@ -33,7 +33,7 @@ void TrumaiNetBoxAppAirconManual::create_update_data(StatusFrame *response, uint
 
   response->airconManualResponse.mode = this->update_status_.mode;
   response->airconManualResponse.unknown_02 = this->update_status_.unknown_02;
-  response->airconManualResponse.operation = this->update_status_.operation;
+  response->airconManualResponse.vent_mode = this->update_status_.vent_mode;
   response->airconManualResponse.energy_mix = this->update_status_.energy_mix;
   response->airconManualResponse.target_temp_aircon = this->update_status_.target_temp_aircon;
 
@@ -52,13 +52,98 @@ bool TrumaiNetBoxAppAirconManual::can_update() {
 
 bool TrumaiNetBoxAppAirconManual::action_set_temp(uint8_t temperature) {
   if (!this->can_update()) {
-    ESP_LOGW(TAG, "Cannot update Truma.");
+    ESP_LOGW(TAG, "Cannot update Truma aircon.");
+    return false;
+  }
+
+  auto update_data = this->update_prepare();
+  update_data->target_temp_aircon = decimal_to_aircon_manual_temp(temperature);
+
+  this->update_submit();
+  return true;
+}
+
+bool TrumaiNetBoxAppAirconManual::action_set_mode(AirconMode mode) {
+  if (!this->can_update()) {
+    ESP_LOGW(TAG, "Cannot update Truma aircon.");
+    return false;
+  }
+
+  auto update_data = this->update_prepare();
+  update_data->mode = mode;
+
+  // When turning off, set vent mode to low as default
+  if (mode == AirconMode::AIRCON_MODE_OFF) {
+    update_data->vent_mode = AirconVentMode::AIRCON_VENT_LOW;
+  }
+  // When setting auto mode, vent must also be auto
+  if (mode == AirconMode::AIRCON_MODE_AUTO) {
+    update_data->vent_mode = AirconVentMode::AIRCON_VENT_AUTO;
+  }
+  // For vent/cool/hot modes, ensure vent mode is not auto (use low if currently auto)
+  if ((mode == AirconMode::AIRCON_MODE_VENTILATION || mode == AirconMode::AIRCON_MODE_COOLING ||
+       mode == AirconMode::AIRCON_MODE_HEATING) &&
+      update_data->vent_mode == AirconVentMode::AIRCON_VENT_AUTO) {
+    update_data->vent_mode = AirconVentMode::AIRCON_VENT_LOW;
+  }
+
+  this->update_submit();
+  return true;
+}
+
+bool TrumaiNetBoxAppAirconManual::action_set_vent_mode(AirconVentMode vent_mode) {
+  if (!this->can_update()) {
+    ESP_LOGW(TAG, "Cannot update Truma aircon.");
     return false;
   }
 
   auto update_data = this->update_prepare();
 
+  // Vent auto mode is only valid when operating mode is auto
+  if (vent_mode == AirconVentMode::AIRCON_VENT_AUTO) {
+    update_data->mode = AirconMode::AIRCON_MODE_AUTO;
+  }
+  // For non-auto vent modes, ensure mode is not off
+  if (vent_mode != AirconVentMode::AIRCON_VENT_AUTO &&
+      update_data->mode == AirconMode::AIRCON_MODE_OFF) {
+    update_data->mode = AirconMode::AIRCON_MODE_VENTILATION;
+  }
+  // For non-auto vent modes, ensure mode is not auto
+  if (vent_mode != AirconVentMode::AIRCON_VENT_AUTO &&
+      update_data->mode == AirconMode::AIRCON_MODE_AUTO) {
+    update_data->mode = AirconMode::AIRCON_MODE_COOLING;
+  }
+
+  update_data->vent_mode = vent_mode;
+
+  this->update_submit();
+  return true;
+}
+
+bool TrumaiNetBoxAppAirconManual::action_aircon_manual(uint8_t temperature, AirconMode mode, AirconVentMode vent_mode) {
+  if (!this->can_update()) {
+    ESP_LOGW(TAG, "Cannot update Truma aircon.");
+    return false;
+  }
+
+  auto update_data = this->update_prepare();
+
+  update_data->mode = mode;
+  update_data->vent_mode = vent_mode;
   update_data->target_temp_aircon = decimal_to_aircon_manual_temp(temperature);
+
+  // Validate mode/vent_mode combinations
+  if (mode == AirconMode::AIRCON_MODE_OFF) {
+    update_data->vent_mode = AirconVentMode::AIRCON_VENT_LOW;
+  }
+  if (mode == AirconMode::AIRCON_MODE_AUTO) {
+    update_data->vent_mode = AirconVentMode::AIRCON_VENT_AUTO;
+  }
+  if ((mode == AirconMode::AIRCON_MODE_VENTILATION || mode == AirconMode::AIRCON_MODE_COOLING ||
+       mode == AirconMode::AIRCON_MODE_HEATING) &&
+      update_data->vent_mode == AirconVentMode::AIRCON_VENT_AUTO) {
+    update_data->vent_mode = AirconVentMode::AIRCON_VENT_LOW;
+  }
 
   this->update_submit();
   return true;

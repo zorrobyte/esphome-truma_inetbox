@@ -10,3 +10,10 @@
   - platform: truma_inetbox
     name: "Energy Mix Diesel"
     type: HEATER_ENERGY_MIX_DIESEL
+  # Aircon selects
+  - platform: truma_inetbox
+    name: "Aircon Operating Mode"
+    type: AIRCON_MODE
+  - platform: truma_inetbox
+    name: "Aircon Fan Mode"
+    type: AIRCON_VENT_MODE

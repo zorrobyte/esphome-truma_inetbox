@@ -4,3 +4,6 @@
   - platform: truma_inetbox
     name: "Truma Water"
     type: WATER
+  - platform: truma_inetbox
+    name: "Truma Aircon"
+    type: AIRCON
