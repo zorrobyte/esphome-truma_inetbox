@@ -434,7 +434,8 @@ void LinBusListener::process_log_queue(TickType_t xTicksToWait) {
         if (log_msg.len == 0) {
           ESP_LOGV(TAG, "PID %02X      order no answer", current_PID);
         } else if (log_msg.len < 8) {
-          ESP_LOGW(TAG, "PID %02X      %s partial data received", current_PID,
+          // Demoted from WARN to VERBOSE - partial data on config/timer PIDs is normal
+          ESP_LOGV(TAG, "PID %02X      %s partial data received", current_PID,
                    format_hex_pretty(log_msg.data, log_msg.len).c_str());
         }
         break;

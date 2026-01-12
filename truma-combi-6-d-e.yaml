@@ -118,11 +118,14 @@ binary_sensor:
 
 climate:
   - platform: truma_inetbox
-    name: "Truma Room (Diesel/El)"
+    name: "Truma Room (Propane/El)"
     type: ROOM
   - platform: truma_inetbox
     name: "Truma Water"
     type: WATER
+  - platform: truma_inetbox
+    name: "Truma Aircon"
+    type: AIRCON
 
 sensor:
   - platform: truma_inetbox
@@ -164,6 +167,20 @@ sensor:
     name: "Heater error code"
     type: HEATER_ERROR_CODE
 
+  # Aircon sensors
+  - platform: truma_inetbox
+    name: "Aircon Target Temperature"
+    type: AIRCON_TARGET_TEMPERATURE
+  - platform: truma_inetbox
+    name: "Aircon Current Temperature"
+    type: AIRCON_CURRENT_TEMPERATURE
+  - platform: truma_inetbox
+    name: "Aircon Mode"
+    type: AIRCON_MODE
+  - platform: truma_inetbox
+    name: "Aircon Vent Mode"
+    type: AIRCON_VENT_MODE
+
 text_sensor:
   - platform: template
     name: "Heater Energy Mode"
@@ -174,14 +191,14 @@ text_sensor:
 
       // Values from EnergyMix enum in TrumaEnums.h:
       // ENERGY_MIX_NONE = 0
-      // ENERGY_MIX_GAS = 1 (also DIESEL)
+      // ENERGY_MIX_GAS = 1 (also PROPANE)
       // ENERGY_MIX_ELECTRICITY = 2
       // ENERGY_MIX_MIX = 3
 
       if (std::isnan(id(energy_mix_sensor).state)) return {"N/A"};
 
       if (mix == 0) return {"OFF"};
-      if (mix == 1) return {"DIESEL"};
+      if (mix == 1) return {"PROPANE"};
 
       if (mix == 2) { // ELECTRICITY
          if (power == 900) return {"EL_1"};
@@ -264,7 +281,7 @@ switch:
           room_temperature: 13
           heating_mode: ECO
           water_temperature: 0
-          energy_mix: GAS # Diesel only
+          energy_mix: GAS # Propane only
           watt: 0
     turn_off_action:
       - truma_inetbox.timer.disable
@@ -272,7 +289,15 @@ switch:
 select:
   - platform: truma_inetbox
     name: "Energy Mix"
-    type: HEATER_ENERGY_MIX_DIESEL
+    type: HEATER_ENERGY_MIX_PROPANE
+
+  # Aircon selects
+  - platform: truma_inetbox
+    name: "Aircon Operating Mode"
+    type: AIRCON_MODE
+  - platform: truma_inetbox
+    name: "Aircon Fan Mode"
+    type: AIRCON_VENT_MODE
 
   - platform: template
     name: "Electric Power Level"

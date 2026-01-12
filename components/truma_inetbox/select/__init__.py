@@ -48,6 +48,12 @@ CONF_SUPPORTED_TYPE = {
         CONF_ICON: ICON_THERMOMETER,
         CONF_OPTIONS: ("Diesel", "Mix 1", "Mix 2", "Electric 1", "Electric 2"),
     },
+    "HEATER_ENERGY_MIX_PROPANE": {
+        CONF_CLASS: truma_inetbox_ns.class_("TrumaHeaterSelect", select.Select, cg.Component),
+        CONF_TYPE: TRUMA_SELECT_TYPE_dummy_ns.HEATER_ENERGY_MIX,
+        CONF_ICON: ICON_THERMOMETER,
+        CONF_OPTIONS: ("Propane", "Mix 1", "Mix 2", "Electric 1", "Electric 2"),
+    },
     # Aircon selects
     "AIRCON_MODE": {
         CONF_CLASS: truma_inetbox_ns.class_("TrumaAirconSelect", select.Select, cg.Component),

@@ -19,8 +19,14 @@ StatusFrameAirconManualResponse *TrumaiNetBoxAppAirconManual::update_prepare() {
   this->update_status_ = {};
   this->update_status_.mode = this->data_.mode;
   this->update_status_.vent_mode = this->data_.vent_mode;
-  this->update_status_.energy_mix = this->data_.energy_mix;
+  this->update_status_.aircon_on = 0x01;  // Must be 1 for commands to be accepted
   this->update_status_.target_temp_aircon = this->data_.target_temp_aircon;
+
+  // Ensure a valid temperature is set (default to 22°C if not set)
+  if (this->update_status_.target_temp_aircon == TargetTemp::TARGET_TEMP_OFF ||
+      static_cast<uint16_t>(this->update_status_.target_temp_aircon) == 0) {
+    this->update_status_.target_temp_aircon = TargetTemp::TARGET_TEMP_22C;
+  }
 
   this->update_status_prepared_ = true;
   return &this->update_status_;
@@ -32,10 +38,12 @@ void TrumaiNetBoxAppAirconManual::create_update_data(StatusFrame *response, uint
                             command_counter);
 
   response->airconManualResponse.mode = this->update_status_.mode;
-  response->airconManualResponse.unknown_02 = this->update_status_.unknown_02;
+  response->airconManualResponse.unknown_02 = 0x00;
   response->airconManualResponse.vent_mode = this->update_status_.vent_mode;
-  response->airconManualResponse.energy_mix = this->update_status_.energy_mix;
+  response->airconManualResponse.aircon_on = 0x01;  // Must always be 1
   response->airconManualResponse.target_temp_aircon = this->update_status_.target_temp_aircon;
+  // Zero out padding bytes
+  memset(response->airconManualResponse.padding, 0x00, sizeof(response->airconManualResponse.padding));
 
   status_frame_calculate_checksum(response);
   (*response_len) = sizeof(StatusFrameHeader) + sizeof(StatusFrameAirconManualResponse);

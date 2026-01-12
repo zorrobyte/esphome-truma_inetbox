@@ -60,7 +60,7 @@ void TrumaRoomClimate::control(const climate::ClimateCall &call) {
     switch (mode) {
       case climate::CLIMATE_MODE_HEAT:
         if (status_heater->target_temp_room == TargetTemp::TARGET_TEMP_OFF) {
-          this->parent_->get_heater()->action_heater_room(5);
+          this->parent_->get_heater()->action_heater_room(20);  // 68°F default
         }
         break;
       default:
