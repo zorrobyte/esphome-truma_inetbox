@@ -153,10 +153,14 @@ sensor:
   - platform: truma_inetbox
     name: "Current Room Temperature"
     type: CURRENT_ROOM_TEMPERATURE
+    filters:
+      - heartbeat: 60s  # Ensure HA history gets regular updates
 
   - platform: truma_inetbox
     name: "Current Water Temperature"
     type: CURRENT_WATER_TEMPERATURE
+    filters:
+      - heartbeat: 60s
 
   - platform: truma_inetbox
     name: "Target Room Temperature (sensor)"
@@ -184,6 +188,8 @@ sensor:
     name: "Operating status (raw)"
     type: OPERATING_STATUS
     id: operating_status_raw
+    filters:
+      - heartbeat: 60s
 
   - platform: truma_inetbox
     name: "Heater error code"
@@ -196,6 +202,8 @@ sensor:
   - platform: truma_inetbox
     name: "Aircon Current Temperature"
     type: AIRCON_CURRENT_TEMPERATURE
+    filters:
+      - heartbeat: 60s
   - platform: truma_inetbox
     name: "Aircon Mode"
     type: AIRCON_MODE
