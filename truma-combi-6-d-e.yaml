@@ -48,7 +48,7 @@ web_server:
   include_internal: true
 
 # ---------------------------------------------------------
-# TIME SYNC (once per boot to avoid NAND wear)
+# TIME SYNC (only if drifted >30s, once per boot)
 # ---------------------------------------------------------
 globals:
   - id: clock_synced
@@ -65,9 +65,37 @@ time:
             condition:
               lambda: 'return !id(clock_synced);'
             then:
-              - truma_inetbox.clock.set
-              - lambda: 'id(clock_synced) = true;'
-              - logger.log: "CP Plus clock synced with Home Assistant time"
+              - lambda: 'id(clock_synced) = true;'  # Mark checked regardless
+              - if:
+                  condition:
+                    lambda: |-
+                      // Check if CP Plus clock data is valid
+                      auto clock_status = id(truma)->get_clock()->get_status();
+                      if (!id(truma)->get_clock()->get_status_valid()) {
+                        ESP_LOGD("clock_sync", "CP Plus clock not yet received, syncing anyway");
+                        return true;  // Sync if we haven't received clock data yet
+                      }
+                      
+                      // Get current HA time
+                      auto now = id(homeassistant_time).now();
+                      if (!now.is_valid()) return false;
+                      
+                      // Calculate drift in seconds
+                      int ha_seconds = now.hour * 3600 + now.minute * 60 + now.second;
+                      int cp_seconds = clock_status->clock_hour * 3600 + clock_status->clock_minute * 60 + clock_status->clock_second;
+                      int drift = abs(ha_seconds - cp_seconds);
+                      
+                      // Handle midnight wraparound (e.g., 23:59 vs 00:01)
+                      if (drift > 43200) drift = 86400 - drift;
+                      
+                      ESP_LOGD("clock_sync", "CP Plus: %02d:%02d:%02d, HA: %02d:%02d:%02d, Drift: %ds",
+                               clock_status->clock_hour, clock_status->clock_minute, clock_status->clock_second,
+                               now.hour, now.minute, now.second, drift);
+                      
+                      return drift > 30;  // Only sync if drift > 30 seconds
+                  then:
+                    - truma_inetbox.clock.set
+                    - logger.log: "CP Plus clock synced (drift exceeded 30s)"
 
 # ---------------------------------------------------------
 # HARDWARE SECTION (ESP32S3_CAN_LIN_rev_B)
@@ -86,6 +114,7 @@ uart:
 # ---------------------------------------------------------
 
 truma_inetbox:
+  id: truma
   debug: false
   uart_id: lin_uart_bus
   cs_pin: 46       # LIN transceiver chip select (active HIGH)
