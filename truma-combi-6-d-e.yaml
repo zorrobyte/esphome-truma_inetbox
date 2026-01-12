@@ -48,6 +48,28 @@ web_server:
   include_internal: true
 
 # ---------------------------------------------------------
+# TIME SYNC (once per boot to avoid NAND wear)
+# ---------------------------------------------------------
+globals:
+  - id: clock_synced
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    on_time_sync:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(clock_synced);'
+            then:
+              - truma_inetbox.clock.set
+              - lambda: 'id(clock_synced) = true;'
+              - logger.log: "CP Plus clock synced with Home Assistant time"
+
+# ---------------------------------------------------------
 # HARDWARE SECTION (ESP32S3_CAN_LIN_rev_B)
 # ---------------------------------------------------------
 uart:
