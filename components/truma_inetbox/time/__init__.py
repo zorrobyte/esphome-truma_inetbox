@@ -15,7 +15,7 @@ CONF_AUTO_DISABLE = "auto_disable"
 TrumaTime = truma_inetbox_ns.class_(
     "TrumaTime", time.RealTimeClock, cg.Component)
 
-CONFIG_SCHEMA = time.TIME_SCHEMA.extend(
+CONFIG_SCHEMA = getattr(time, "TIME_SCHEMA", time._TIME_SCHEMA).extend(
     {
         cv.GenerateID(): cv.declare_id(TrumaTime),
         cv.GenerateID(CONF_TRUMA_INETBOX_ID): cv.use_id(TrumaINetBoxApp),

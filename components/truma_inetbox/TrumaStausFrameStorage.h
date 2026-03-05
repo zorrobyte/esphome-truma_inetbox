@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/core/automation.h"
+#include <cstring>
 
 namespace esphome {
 namespace truma_inetbox {
@@ -10,6 +11,9 @@ template<typename T> class TrumaStausFrameStorage {
   bool get_status_valid() { return this->data_valid_; };
   const T *get_status() { return &this->data_; };
   virtual void set_status(T val) {
+    if (this->data_valid_ && std::memcmp(&val, &this->data_, sizeof(T)) == 0) {
+      return;
+    }
     this->data_ = val;
     this->data_valid_ = true;
     this->data_updated_ = true;

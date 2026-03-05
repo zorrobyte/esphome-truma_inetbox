@@ -49,7 +49,10 @@ void TrumaRoomClimate::dump_config() { LOG_CLIMATE(TAG, "Truma Room Climate", th
 
 void TrumaRoomClimate::control(const climate::ClimateCall &call) {
   if (call.get_target_temperature().has_value() && !call.get_fan_mode().has_value()) {
-    float temp = *call.get_target_temperature();
+    float temp = std::round(*call.get_target_temperature());
+    this->target_temperature = temp;
+    this->mode = climate::CLIMATE_MODE_HEAT;
+    this->publish_state();
     this->parent_->get_heater()->action_heater_room(static_cast<uint8_t>(temp));
   }
 
@@ -60,10 +63,16 @@ void TrumaRoomClimate::control(const climate::ClimateCall &call) {
     switch (mode) {
       case climate::CLIMATE_MODE_HEAT:
         if (status_heater->target_temp_room == TargetTemp::TARGET_TEMP_OFF) {
+          this->mode = climate::CLIMATE_MODE_HEAT;
+          this->target_temperature = 20;
+          this->publish_state();
           this->parent_->get_heater()->action_heater_room(20);  // 68°F default
         }
         break;
       default:
+        this->mode = climate::CLIMATE_MODE_OFF;
+        this->target_temperature = NAN;
+        this->publish_state();
         this->parent_->get_heater()->action_heater_room(0);
         break;
     }
@@ -87,6 +96,12 @@ void TrumaRoomClimate::control(const climate::ClimateCall &call) {
       default:
         break;
     }
+    this->fan_mode = fan_mode;
+    if (temp > 0) {
+      this->target_temperature = temp;
+      this->mode = climate::CLIMATE_MODE_HEAT;
+    }
+    this->publish_state();
     switch (fan_mode) {
       case climate::CLIMATE_FAN_LOW:
         this->parent_->get_heater()->action_heater_room(static_cast<uint8_t>(temp), HeatingMode::HEATING_MODE_ECO);

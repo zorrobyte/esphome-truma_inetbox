@@ -81,6 +81,7 @@ void TrumaHeaterSelect::control(const std::string &value) {
   if (!index.has_value()) {
     return;
   }
+  this->publish_state(value);
   auto heater_device = this->parent_->get_heater_device();
   auto status_heater = this->parent_->get_heater()->get_status();
   float temp = temp_code_to_decimal(status_heater->target_temp_room, 0);
