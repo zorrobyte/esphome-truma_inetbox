@@ -53,13 +53,13 @@ void EmberOneControl::setup() {
     this->set_auth_state_(AuthState::DISCONNECTED);
   }
 
+  // Register GATT callback BEFORE app_register (ESP-IDF requirement)
+  esp_ble_gattc_register_callback(EmberOneControl::gattc_event_handler_static_);
+
   // Register GATT client application — callback will fire ESP_GATTC_REG_EVT
   esp_err_t ret = esp_ble_gattc_app_register(0);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "GATT client app_register failed: %s", esp_err_to_name(ret));
-  } else {
-    // Register our static callback for GATT client events
-    esp_ble_gattc_register_callback(EmberOneControl::gattc_event_handler_static_);
   }
 }
 

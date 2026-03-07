@@ -39,7 +39,7 @@ wifi:
 external_components:
   - source:
       type: local
-      path: components
+      path: ../components
 
 # BLE scanner (required for auto-discovery)
 esp32_ble_tracker:
