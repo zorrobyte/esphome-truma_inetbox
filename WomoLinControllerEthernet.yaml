@@ -10,7 +10,7 @@ external_components:
     components: ["truma_inetbox"]
 
 esp32:
-  board: esp32dev
+  board: mhetesp32devkit
   framework:
     type: arduino
 

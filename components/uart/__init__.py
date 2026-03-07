@@ -55,7 +55,7 @@ MULTI_CONF = True
 def validate_raw_data(value):
     if isinstance(value, str):
         return value.encode("utf-8")
-    if isinstance(value, str):
+    if isinstance(value, bytes):
         return value
     if isinstance(value, list):
         return cv.Schema([cv.hex_uint8_t])(value)
@@ -204,7 +204,7 @@ async def debug_to_code(config, parent):
         data = after[CONF_DELIMITER]
         if isinstance(data, bytes):
             data = list(data)
-        for byte in after[CONF_DELIMITER]:
+        for byte in data:
             cg.add(trigger.add_delimiter_byte(byte))
     if config[CONF_DUMMY_RECEIVER]:
         dummy = cg.new_Pvariable(config[CONF_DUMMY_RECEIVER_ID], parent)

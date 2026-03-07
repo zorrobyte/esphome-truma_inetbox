@@ -7,14 +7,15 @@ esphome:
       - ds1307.read_time
 
 external_components:
-  - source: github://Fabian-Schmidt/esphome-truma_inetbox
-  # - source:
-  #     type: local
-  #     path: ./components
-    components: ["truma_inetbox"]
+  # - source: github://Fabian-Schmidt/esphome-truma_inetbox
+  #   components: ["truma_inetbox", "uart"]
+  - source:
+      type: local
+      path: ./components
+    components: ["truma_inetbox", "uart"]
 
 esp32:
-  board: esp32dev
+  board: mhetesp32devkit
   framework:
     type: arduino
 

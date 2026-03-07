@@ -172,7 +172,7 @@ void LinBusProtocol::lin_msg_diag_single_(const uint8_t *message, uint8_t length
 
 void LinBusProtocol::lin_msg_diag_first_(const uint8_t *message, uint8_t length) {
   uint8_t protocol_control_information = message[1];
-  uint16_t message_length = (protocol_control_information & 0x0F << 8) + message[2];
+  uint16_t message_length = ((protocol_control_information & 0x0F) << 8) + message[2];
   if (message_length < 7) {
     ESP_LOGE(TAG, "LIN Protocol issue: Multi frame message too short.");
     // ignore invalid message
