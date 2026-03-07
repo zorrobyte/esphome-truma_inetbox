@@ -48,7 +48,9 @@ void TrumaRoomClimate::setup() {
 void TrumaRoomClimate::dump_config() { LOG_CLIMATE(TAG, "Truma Room Climate", this); }
 
 void TrumaRoomClimate::control(const climate::ClimateCall &call) {
-  if (call.get_target_temperature().has_value() && !call.get_fan_mode().has_value()) {
+  bool has_explicit_temp = call.get_target_temperature().has_value();
+
+  if (has_explicit_temp && !call.get_fan_mode().has_value()) {
     float temp = std::round(*call.get_target_temperature());
     this->target_temperature = temp;
     this->mode = climate::CLIMATE_MODE_HEAT;
@@ -62,7 +64,8 @@ void TrumaRoomClimate::control(const climate::ClimateCall &call) {
     auto status_heater = this->parent_->get_heater()->get_status();
     switch (mode) {
       case climate::CLIMATE_MODE_HEAT:
-        if (status_heater->target_temp_room == TargetTemp::TARGET_TEMP_OFF) {
+        // Only apply default temp if no explicit target was provided in this call
+        if (!has_explicit_temp && status_heater->target_temp_room == TargetTemp::TARGET_TEMP_OFF) {
           this->mode = climate::CLIMATE_MODE_HEAT;
           this->target_temperature = 20;
           this->publish_state();

@@ -8,5 +8,14 @@
 
 /local_*
 
+# Test logs
+test_live.log
+test_results.log
+test_stdout.log
+
+# Backups
+/backups/
+*.bak
+
 # Reference repositories
-/inetbox2mqtt_ref/
+/inetbox2mqtt_ref/examples/secrets.yaml
