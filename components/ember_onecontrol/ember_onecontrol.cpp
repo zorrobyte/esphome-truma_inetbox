@@ -5,10 +5,33 @@
 namespace esphome {
 namespace ember_onecontrol {
 
+namespace espbt = esp32_ble_tracker;
+
 static const char *TAG = "ember_onecontrol";
 
 // Static instance pointer for GATT callback routing
 EmberOneControl *EmberOneControl::instance_ = nullptr;
+
+// Helper: convert a string UUID to esp_bt_uuid_t (128-bit)
+static esp_bt_uuid_t uuid_from_string(const char *uuid_str) {
+  auto uuid = espbt::ESPBTUUID::from_raw(std::string(uuid_str));
+  return uuid.as_128bit().get_uuid();
+}
+
+// Helper: find a characteristic handle by service + char UUID
+static uint16_t find_char_handle(esp_gatt_if_t gattc_if, uint16_t conn_id,
+                                 const char *svc_uuid_str, const char *char_uuid_str) {
+  esp_bt_uuid_t svc_uuid = uuid_from_string(svc_uuid_str);
+  esp_bt_uuid_t char_uuid = uuid_from_string(char_uuid_str);
+  uint16_t count = 1;
+  esp_gattc_char_elem_t result;
+  memset(&result, 0, sizeof(result));
+  esp_err_t status = esp_ble_gattc_get_char_by_uuid(gattc_if, conn_id, svc_uuid, char_uuid, &result, &count);
+  if (status == ESP_OK && count > 0) {
+    return result.char_handle;
+  }
+  return 0;
+}
 
 // ---------------------------------------------------------------------------
 // Component lifecycle
@@ -29,6 +52,15 @@ void EmberOneControl::setup() {
     ESP_LOGI(TAG, "No saved panel MAC — press Pair button to begin pairing");
     this->set_auth_state_(AuthState::DISCONNECTED);
   }
+
+  // Register GATT client application — callback will fire ESP_GATTC_REG_EVT
+  esp_err_t ret = esp_ble_gattc_app_register(0);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "GATT client app_register failed: %s", esp_err_to_name(ret));
+  } else {
+    // Register our static callback for GATT client events
+    esp_ble_gattc_register_callback(EmberOneControl::gattc_event_handler_static_);
+  }
 }
 
 void EmberOneControl::loop() {
@@ -36,6 +68,16 @@ void EmberOneControl::loop() {
   if (this->pairing_active_ && (millis() - this->pairing_start_time_ > PAIRING_TIMEOUT_MS)) {
     ESP_LOGW(TAG, "Pairing timeout reached (%u ms), stopping pairing", PAIRING_TIMEOUT_MS);
     this->stop_pairing();
+  }
+
+  // Delayed re-read of UNLOCK_STATUS after key write (500ms delay)
+  if (this->unlock_reread_pending_ && (millis() - this->unlock_reread_time_ >= 500)) {
+    this->unlock_reread_pending_ = false;
+    if (this->unlock_status_handle_ != 0 && this->gattc_if_ != 0 && this->conn_id_ != 0) {
+      ESP_LOGI(TAG, "Re-reading UNLOCK_STATUS after key write...");
+      esp_ble_gattc_read_char(this->gattc_if_, this->conn_id_, this->unlock_status_handle_,
+                              ESP_GATT_AUTH_REQ_NONE);
+    }
   }
 }
 
@@ -80,10 +122,63 @@ void EmberOneControl::set_auth_state_(AuthState state) {
 // ---------------------------------------------------------------------------
 
 bool EmberOneControl::parse_device(const esp32_ble_tracker::ESPBTDevice &device) {
-  // TODO (Task 5): implement advertisement filtering
-  // - If pairing_active_: look for Lippert manufacturer data, save MAC, connect
-  // - If has_saved_mac_: match against saved MAC, connect
-  // For now, just a stub that does not match any device.
+  // If already connecting/connected/authenticated, ignore advertisements
+  if (this->auth_state_ >= AuthState::CONNECTING) {
+    return false;
+  }
+
+  // Reconnect to saved MAC
+  if (this->has_saved_mac_ && !this->pairing_active_) {
+    // Compare advertisement address to saved MAC
+    auto addr = device.address_uint64();
+    // Convert panel_mac_ (6 bytes big-endian) to uint64_t for comparison
+    uint64_t saved = 0;
+    for (int i = 0; i < 6; i++) {
+      saved = (saved << 8) | this->panel_mac_[i];
+    }
+    if (addr == saved) {
+      ESP_LOGI(TAG, "Found saved panel, connecting...");
+      this->connect_to_device_(this->panel_mac_);
+      return true;
+    }
+    return false;
+  }
+
+  // Pairing mode: look for Lippert manufacturer data
+  if (this->pairing_active_) {
+    for (auto &mfr_data : device.get_manufacturer_datas()) {
+      if (mfr_data.uuid == espbt::ESPBTUUID::from_uint16(LIPPERT_MANUFACTURER_ID)) {
+        if (mfr_data.data.empty()) continue;
+        uint8_t pairing_info = mfr_data.data[0];
+        // Check if pairing-active bit (bit 1) is set
+        if (pairing_info & 0x02) {
+          ESP_LOGI(TAG, "Found Lippert panel in pairing mode!");
+
+          // Extract MAC from the advertisement
+          auto raw_addr = device.address_uint64();
+          // Convert uint64_t to esp_bd_addr_t (6 bytes, big-endian)
+          uint8_t mac[6];
+          for (int i = 5; i >= 0; i--) {
+            mac[i] = raw_addr & 0xFF;
+            raw_addr >>= 8;
+          }
+
+          // Save MAC
+          memcpy(this->panel_mac_, mac, 6);
+          this->has_saved_mac_ = true;
+          this->save_mac_to_nvs_(mac);
+          this->pairing_active_ = false;
+
+          ESP_LOGI(TAG, "Paired with panel: %02X:%02X:%02X:%02X:%02X:%02X",
+                   mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+          this->connect_to_device_(this->panel_mac_);
+          return true;
+        }
+      }
+    }
+  }
+
   return false;
 }
 
@@ -122,7 +217,7 @@ void EmberOneControl::clear_paired_device() {
 }
 
 // ---------------------------------------------------------------------------
-// GATT client stubs (Task 5 will implement)
+// GATT client — static callback router
 // ---------------------------------------------------------------------------
 
 void EmberOneControl::gattc_event_handler_static_(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
@@ -132,36 +227,182 @@ void EmberOneControl::gattc_event_handler_static_(esp_gattc_cb_event_t event, es
   }
 }
 
+// ---------------------------------------------------------------------------
+// GATT client — event handler
+// ---------------------------------------------------------------------------
+
 void EmberOneControl::gattc_event_handler_(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
                                              esp_ble_gattc_cb_param_t *param) {
-  // TODO (Task 5): full GATT event handling
-  // Will handle: ESP_GATTC_REG_EVT, ESP_GATTC_OPEN_EVT, ESP_GATTC_DISCONNECT_EVT,
-  //              ESP_GATTC_SEARCH_CMPL_EVT, ESP_GATTC_READ_CHAR_EVT,
-  //              ESP_GATTC_NOTIFY_EVT, ESP_GATTC_WRITE_CHAR_EVT, ESP_GATTC_REG_FOR_NOTIFY_EVT
-  ESP_LOGW(TAG, "gattc_event_handler_ stub called (event=%d) — not yet implemented", (int) event);
-}
+  switch (event) {
+    case ESP_GATTC_REG_EVT: {
+      if (param->reg.status == ESP_GATT_OK) {
+        this->gattc_if_ = gattc_if;
+        this->gattc_registered_ = true;
+        ESP_LOGI(TAG, "GATT client registered (if=%d)", gattc_if);
+        // If we already have a saved MAC, connect now
+        if (this->has_saved_mac_) {
+          this->connect_to_device_(this->panel_mac_);
+        }
+      } else {
+        ESP_LOGE(TAG, "GATT client registration failed: %d", param->reg.status);
+      }
+      break;
+    }
 
-void EmberOneControl::connect_to_device_(const esp_bd_addr_t addr) {
-  // TODO (Task 5): register GATT client app + open connection
-  ESP_LOGW(TAG, "connect_to_device_ stub — not yet implemented");
-}
+    case ESP_GATTC_OPEN_EVT: {
+      if (param->open.status == ESP_GATT_OK) {
+        this->conn_id_ = param->open.conn_id;
+        ESP_LOGI(TAG, "Connected (conn_id=%d), discovering services...", this->conn_id_);
+        this->set_auth_state_(AuthState::CONNECTED);
+        esp_ble_gattc_search_service(this->gattc_if_, this->conn_id_, nullptr);
+      } else {
+        ESP_LOGW(TAG, "Connection failed: status=%d", param->open.status);
+        this->set_auth_state_(this->has_saved_mac_ ? AuthState::SCANNING : AuthState::DISCONNECTED);
+      }
+      break;
+    }
 
-void EmberOneControl::disconnect_() {
-  // TODO (Task 5): close GATT connection
-  if (this->auth_state_ != AuthState::DISCONNECTED) {
-    ESP_LOGW(TAG, "disconnect_ stub — resetting state only");
-    this->unlock_status_handle_ = 0;
-    this->key_handle_ = 0;
-    this->seed_handle_ = 0;
-    this->data_write_handle_ = 0;
-    this->data_read_handle_ = 0;
-    this->cobs_decoder_.reset();
-    this->set_auth_state_(AuthState::DISCONNECTED);
+    case ESP_GATTC_SEARCH_CMPL_EVT: {
+      if (param->search_cmpl.status != ESP_GATT_OK) {
+        ESP_LOGW(TAG, "Service search failed: %d", param->search_cmpl.status);
+        this->disconnect_();
+        break;
+      }
+      ESP_LOGI(TAG, "Service discovery complete, finding characteristics...");
+
+      // Find Auth service characteristics
+      this->unlock_status_handle_ = find_char_handle(this->gattc_if_, this->conn_id_,
+                                                      AUTH_SERVICE_UUID, UNLOCK_STATUS_CHAR_UUID);
+      this->key_handle_ = find_char_handle(this->gattc_if_, this->conn_id_,
+                                            AUTH_SERVICE_UUID, KEY_CHAR_UUID);
+      this->seed_handle_ = find_char_handle(this->gattc_if_, this->conn_id_,
+                                             AUTH_SERVICE_UUID, SEED_CHAR_UUID);
+
+      // Find Data service characteristics
+      this->data_write_handle_ = find_char_handle(this->gattc_if_, this->conn_id_,
+                                                   DATA_SERVICE_UUID, DATA_WRITE_CHAR_UUID);
+      this->data_read_handle_ = find_char_handle(this->gattc_if_, this->conn_id_,
+                                                  DATA_SERVICE_UUID, DATA_READ_CHAR_UUID);
+
+      ESP_LOGI(TAG, "Handles: unlock_status=0x%04X, key=0x%04X, seed=0x%04X, data_write=0x%04X, data_read=0x%04X",
+               this->unlock_status_handle_, this->key_handle_, this->seed_handle_,
+               this->data_write_handle_, this->data_read_handle_);
+
+      // Start authentication
+      this->start_authentication_();
+      break;
+    }
+
+    case ESP_GATTC_READ_CHAR_EVT: {
+      if (param->read.status != ESP_GATT_OK) {
+        ESP_LOGW(TAG, "Read characteristic failed: status=%d handle=0x%04X",
+                 param->read.status, param->read.handle);
+        break;
+      }
+      if (param->read.handle == this->unlock_status_handle_) {
+        this->handle_unlock_status_read_(param->read.value, param->read.value_len);
+      }
+      break;
+    }
+
+    case ESP_GATTC_WRITE_CHAR_EVT: {
+      if (param->write.status != ESP_GATT_OK) {
+        ESP_LOGW(TAG, "Write characteristic failed: status=%d handle=0x%04X",
+                 param->write.status, param->write.handle);
+        break;
+      }
+      if (param->write.handle == this->key_handle_) {
+        ESP_LOGI(TAG, "KEY write confirmed, scheduling UNLOCK_STATUS re-read in 500ms...");
+        this->unlock_reread_pending_ = true;
+        this->unlock_reread_time_ = millis();
+      }
+      break;
+    }
+
+    case ESP_GATTC_NOTIFY_EVT: {
+      if (param->notify.handle == this->seed_handle_) {
+        this->handle_seed_notification_(param->notify.value, param->notify.value_len);
+      } else if (param->notify.handle == this->data_read_handle_) {
+        // Feed bytes into COBS decoder
+        for (uint16_t i = 0; i < param->notify.value_len; i++) {
+          if (this->cobs_decoder_.decode_byte(param->notify.value[i])) {
+            this->process_decoded_frame_(this->cobs_decoder_.get_frame());
+          }
+        }
+      } else {
+        ESP_LOGD(TAG, "Notification on unknown handle 0x%04X (%d bytes)",
+                 param->notify.handle, param->notify.value_len);
+      }
+      break;
+    }
+
+    case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
+      if (param->reg_for_notify.status != ESP_GATT_OK) {
+        ESP_LOGW(TAG, "Register for notify failed: status=%d handle=0x%04X",
+                 param->reg_for_notify.status, param->reg_for_notify.handle);
+        break;
+      }
+      ESP_LOGI(TAG, "Notifications registered for handle 0x%04X", param->reg_for_notify.handle);
+      if (param->reg_for_notify.handle == this->data_read_handle_) {
+        // Data notifications ready — request device metadata
+        this->send_get_devices_metadata_();
+      }
+      break;
+    }
+
+    case ESP_GATTC_DISCONNECT_EVT: {
+      ESP_LOGW(TAG, "Disconnected (reason=0x%X)", param->disconnect.reason);
+      this->conn_id_ = 0;
+      this->unlock_status_handle_ = 0;
+      this->key_handle_ = 0;
+      this->seed_handle_ = 0;
+      this->data_write_handle_ = 0;
+      this->data_read_handle_ = 0;
+      this->unlock_reread_pending_ = false;
+      this->cobs_decoder_.reset();
+      this->set_auth_state_(this->has_saved_mac_ ? AuthState::SCANNING : AuthState::DISCONNECTED);
+      break;
+    }
+
+    default:
+      break;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Auth flow stubs (Task 5 will implement with this->gattc_if_ / this->conn_id_)
+// Connection management
+// ---------------------------------------------------------------------------
+
+void EmberOneControl::connect_to_device_(const esp_bd_addr_t addr) {
+  if (!this->gattc_registered_) {
+    // Save MAC and wait for REG_EVT to connect
+    memcpy(this->panel_mac_, addr, 6);
+    ESP_LOGD(TAG, "GATT not yet registered, will connect after registration");
+    return;
+  }
+  this->set_auth_state_(AuthState::CONNECTING);
+  ESP_LOGI(TAG, "Opening GATT connection to %02X:%02X:%02X:%02X:%02X:%02X",
+           addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
+  esp_ble_gattc_open(this->gattc_if_, const_cast<uint8_t *>(addr), BLE_ADDR_TYPE_PUBLIC, true);
+}
+
+void EmberOneControl::disconnect_() {
+  if (this->conn_id_ != 0 && this->gattc_if_ != 0) {
+    esp_ble_gattc_close(this->gattc_if_, this->conn_id_);
+  }
+  this->conn_id_ = 0;
+  this->unlock_status_handle_ = 0;
+  this->key_handle_ = 0;
+  this->seed_handle_ = 0;
+  this->data_write_handle_ = 0;
+  this->data_read_handle_ = 0;
+  this->unlock_reread_pending_ = false;
+  this->cobs_decoder_.reset();
+  this->set_auth_state_(AuthState::DISCONNECTED);
+}
+
+// ---------------------------------------------------------------------------
+// Auth flow
 // ---------------------------------------------------------------------------
 
 void EmberOneControl::start_authentication_() {
@@ -174,8 +415,8 @@ void EmberOneControl::start_authentication_() {
 
   ESP_LOGI(TAG, "Step 1: Reading UNLOCK_STATUS to get challenge...");
   this->set_auth_state_(AuthState::READING_UNLOCK_STATUS);
-  // TODO (Task 5): use this->gattc_if_ and this->conn_id_ instead of parent()
-  ESP_LOGW(TAG, "start_authentication_ GATT read not yet implemented");
+  esp_ble_gattc_read_char(this->gattc_if_, this->conn_id_, this->unlock_status_handle_,
+                          ESP_GATT_AUTH_REQ_NONE);
 }
 
 void EmberOneControl::handle_unlock_status_read_(const uint8_t *data, size_t len) {
@@ -207,23 +448,28 @@ void EmberOneControl::handle_unlock_status_read_(const uint8_t *data, size_t len
              response[0], response[1], response[2], response[3]);
 
     this->set_auth_state_(AuthState::UNLOCK_KEY_SENT);
-    // TODO (Task 5): use this->gattc_if_ and this->conn_id_
-    ESP_LOGW(TAG, "handle_unlock_status_read_ GATT write not yet implemented");
+    esp_ble_gattc_write_char(this->gattc_if_, this->conn_id_, this->key_handle_,
+                             4, response, ESP_GATT_WRITE_TYPE_NO_RSP, ESP_GATT_AUTH_REQ_NONE);
+    // Schedule re-read via loop() timer (WRITE_TYPE_NO_RSP may not trigger WRITE_CHAR_EVT)
+    this->unlock_reread_pending_ = true;
+    this->unlock_reread_time_ = millis();
   } else if (this->auth_state_ == AuthState::UNLOCK_KEY_SENT || this->auth_state_ == AuthState::AUTH_KEY_SENT) {
-    ESP_LOGI(TAG, "Unlock status after key write: %d bytes (waiting for SEED notification)", len);
+    ESP_LOGI(TAG, "Unlock status after key write: %d bytes (waiting for SEED notification)", (int) len);
     this->set_auth_state_(AuthState::WAITING_FOR_SEED);
-    // TODO (Task 5): register for SEED notifications using this->gattc_if_
-    ESP_LOGW(TAG, "handle_unlock_status_read_ SEED notify registration not yet implemented");
+    // Register for SEED notifications
+    if (this->seed_handle_ != 0) {
+      esp_ble_gattc_register_for_notify(this->gattc_if_, this->panel_mac_, this->seed_handle_);
+    }
     this->enable_data_notifications_();
   } else {
-    ESP_LOGW(TAG, "Unexpected UNLOCK_STATUS response: %d bytes", len);
+    ESP_LOGW(TAG, "Unexpected UNLOCK_STATUS response: %d bytes", (int) len);
     this->enable_data_notifications_();
   }
 }
 
 void EmberOneControl::handle_seed_notification_(const uint8_t *data, size_t len) {
   if (len < 4) {
-    ESP_LOGW(TAG, "SEED notification too short: %d bytes", len);
+    ESP_LOGW(TAG, "SEED notification too short: %d bytes", (int) len);
     return;
   }
 
@@ -234,8 +480,11 @@ void EmberOneControl::handle_seed_notification_(const uint8_t *data, size_t len)
 
   ESP_LOGI(TAG, "Writing 16-byte auth key to KEY characteristic...");
   this->set_auth_state_(AuthState::AUTH_KEY_SENT);
-  // TODO (Task 5): use this->gattc_if_ and this->conn_id_
-  ESP_LOGW(TAG, "handle_seed_notification_ GATT write not yet implemented");
+  esp_ble_gattc_write_char(this->gattc_if_, this->conn_id_, this->key_handle_,
+                           16, this->auth_key_, ESP_GATT_WRITE_TYPE_NO_RSP, ESP_GATT_AUTH_REQ_NONE);
+  // Schedule re-read of UNLOCK_STATUS to verify auth
+  this->unlock_reread_pending_ = true;
+  this->unlock_reread_time_ = millis();
 }
 
 void EmberOneControl::enable_data_notifications_() {
@@ -245,8 +494,7 @@ void EmberOneControl::enable_data_notifications_() {
   }
 
   ESP_LOGI(TAG, "Enabling DATA_READ notifications...");
-  // TODO (Task 5): use this->gattc_if_ and panel_mac_
-  ESP_LOGW(TAG, "enable_data_notifications_ GATT notify registration not yet implemented");
+  esp_ble_gattc_register_for_notify(this->gattc_if_, this->panel_mac_, this->data_read_handle_);
 }
 
 void EmberOneControl::send_get_devices_metadata_() {
@@ -276,12 +524,21 @@ void EmberOneControl::send_switch_command(uint8_t table_id, uint8_t device_id, b
 void EmberOneControl::send_command_(const std::vector<uint8_t> &raw_command) {
   auto encoded = cobs_encode(raw_command.data(), raw_command.size());
 
-  // TODO (Task 5): use this->gattc_if_ and this->conn_id_
-  ESP_LOGW(TAG, "send_command_ GATT write not yet implemented (encoded %d bytes)", (int) encoded.size());
+  if (this->data_write_handle_ == 0 || this->gattc_if_ == 0 || this->conn_id_ == 0) {
+    ESP_LOGW(TAG, "Cannot send command - not connected");
+    return;
+  }
+
+  esp_err_t ret = esp_ble_gattc_write_char(this->gattc_if_, this->conn_id_, this->data_write_handle_,
+                                            encoded.size(), encoded.data(),
+                                            ESP_GATT_WRITE_TYPE_NO_RSP, ESP_GATT_AUTH_REQ_NONE);
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "GATT write command failed: %s", esp_err_to_name(ret));
+  }
 }
 
 // ---------------------------------------------------------------------------
-// NVS persistence stubs (Task 5 will implement)
+// NVS persistence
 // ---------------------------------------------------------------------------
 
 void EmberOneControl::save_mac_to_nvs_(const uint8_t *mac) {

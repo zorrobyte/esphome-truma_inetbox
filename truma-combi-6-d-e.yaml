@@ -360,6 +360,7 @@ select:
 
   - platform: template
     name: "Electric Power Level"
+    update_interval: 1s
     options:
       - "0 W"
       - "900 W"

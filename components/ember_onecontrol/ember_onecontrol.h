@@ -136,6 +136,10 @@ class EmberOneControl : public PollingComponent, public esp32_ble_tracker::ESPBT
   uint16_t data_write_handle_{0};
   uint16_t data_read_handle_{0};
 
+  // Delayed unlock re-read timer
+  bool unlock_reread_pending_{false};
+  uint32_t unlock_reread_time_{0};
+
   // Protocol state
   CobsByteDecoder cobs_decoder_;
   uint16_t command_id_counter_{1};
