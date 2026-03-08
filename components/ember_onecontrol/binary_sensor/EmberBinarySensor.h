@@ -26,6 +26,15 @@ class EmberBinarySensor : public Component, public binary_sensor::BinarySensor, 
   uint8_t table_id_{0};
   uint8_t device_id_{0};
   bool explicit_ids_{false};
+  uint16_t function_name_{0};
+
+  uint16_t get_function_name_for_type_() const {
+    switch (this->type_) {
+      case EMBER_BINARY_SENSOR_TYPE::SLIDE_STATE: return 96;
+      case EMBER_BINARY_SENSOR_TYPE::AWNING_STATE: return 105;
+      default: return 0;
+    }
+  }
 };
 
 }  // namespace ember_onecontrol

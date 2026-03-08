@@ -28,6 +28,16 @@ class EmberSensor : public Component, public sensor::Sensor, public Parented<Emb
   uint8_t table_id_{0};
   uint8_t device_id_{0};
   bool explicit_ids_{false};
+  uint16_t function_name_{0};
+
+  uint16_t get_function_name_for_type_() const {
+    switch (this->type_) {
+      case EMBER_SENSOR_TYPE::TANK_FRESH: return 67;
+      case EMBER_SENSOR_TYPE::TANK_BLACK: return 69;
+      case EMBER_SENSOR_TYPE::TANK_GREY: return 68;
+      default: return 0;
+    }
+  }
 };
 
 }  // namespace ember_onecontrol

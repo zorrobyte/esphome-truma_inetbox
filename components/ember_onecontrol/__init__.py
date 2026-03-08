@@ -1,6 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import esp32_ble_tracker, esp32_ble
+from esphome.components.esp32 import add_idf_sdkconfig_option
 from esphome.const import CONF_ID
 
 DEPENDENCIES = ["esp32_ble_tracker"]
@@ -32,6 +33,10 @@ CONFIG_SCHEMA = (
 
 
 async def to_code(config):
+    # Enable BLE SMP bonding with NVS persistence (required for bond keys to survive reboot/OTA)
+    add_idf_sdkconfig_option("CONFIG_BT_SMP_ENABLE", True)
+    add_idf_sdkconfig_option("CONFIG_BT_BLE_SMP_BOND_NVS_FLASH", True)
+
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await esp32_ble_tracker.register_ble_device(var, config)

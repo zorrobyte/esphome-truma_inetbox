@@ -9,6 +9,178 @@ namespace espbt = esp32_ble_tracker;
 
 static const char *TAG = "ember_onecontrol";
 
+// Static instance for GAP callback wrapper
+EmberOneControl *EmberOneControl::instance_ = nullptr;
+
+// Hardcoded bond keys for panel 94:B5:55:9C:24:FE (captured 2026-03-08).
+// Used as last-resort fallback if NVS backup is missing.
+static const uint8_t HC_PANEL_ADDR[] = {0x94, 0xB5, 0x55, 0x9C, 0x24, 0xFE};
+static const uint8_t HC_PENC[] = {
+  0x61,0xf4,0x3b,0x76,0xac,0x8d,0xa3,0x56,0x79,0x67,0x30,0xcf,0x46,0x6e,0xe7,0x1f,
+  0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00, 0x01, 0x10};
+static const uint8_t HC_PID[] = {
+  0xe5,0x26,0xe7,0xf2,0x06,0xb9,0xe8,0x09,0x3d,0x9d,0x4c,0xc2,0x6a,0x07,0x78,0xd3,
+  0x00, 0x94,0xb5,0x55,0x9c,0x24,0xfe};
+static const uint8_t HC_LENC[] = {
+  0x61,0xf4,0x3b,0x76,0xac,0x8d,0xa3,0x56,0x79,0x67,0x30,0xcf,0x46,0x6e,0xe7,0x1f,
+  0x00,0x00, 0x10, 0x01};
+
+// Write hardcoded bond keys into bt_config.conf as INI text.
+// This constructs the same format Bluedroid uses natively.
+static bool write_hardcoded_bond_config_() {
+  // First read existing config to get the [Adapter] section
+  nvs_handle_t src;
+  std::string config_text;
+
+  if (nvs_open("bt_config.conf", NVS_READONLY, &src) == ESP_OK) {
+    size_t blob_size = 0;
+    if (nvs_get_blob(src, "bt_cfg_key0", nullptr, &blob_size) == ESP_OK && blob_size > 0) {
+      char *buf = (char *) malloc(blob_size + 1);
+      if (buf && nvs_get_blob(src, "bt_cfg_key0", buf, &blob_size) == ESP_OK) {
+        buf[blob_size] = '\0';
+        config_text = buf;
+      }
+      free(buf);
+    }
+    nvs_close(src);
+  }
+
+  if (config_text.empty()) {
+    ESP_LOGW(TAG, "[BOND] No existing bt_config.conf — cannot inject hardcoded keys");
+    return false;
+  }
+
+  // Build hex strings from binary key data
+  auto to_hex = [](const uint8_t *data, size_t len) -> std::string {
+    std::string result;
+    result.reserve(len * 2);
+    for (size_t i = 0; i < len; i++) {
+      char hex[3];
+      snprintf(hex, sizeof(hex), "%02x", data[i]);
+      result += hex;
+    }
+    return result;
+  };
+
+  // Build device section
+  char mac_section[24];
+  snprintf(mac_section, sizeof(mac_section), "[%02x:%02x:%02x:%02x:%02x:%02x]",
+           HC_PANEL_ADDR[0], HC_PANEL_ADDR[1], HC_PANEL_ADDR[2],
+           HC_PANEL_ADDR[3], HC_PANEL_ADDR[4], HC_PANEL_ADDR[5]);
+
+  // Check if device section already exists
+  if (config_text.find(mac_section) != std::string::npos) {
+    ESP_LOGI(TAG, "[BOND] Device section already in config");
+    return false;
+  }
+
+  // Prepend device section (Bluedroid format: device section first, then [Adapter])
+  // Find [Adapter] section and insert device section before it
+  std::string device_section;
+  device_section += mac_section;
+  device_section += "\n";
+  device_section += "AddrType = 0\n";
+  device_section += "AuthMode = 9\n";
+  device_section += "DevType = 2\n";
+  device_section += "LE_KEY_PENC = " + to_hex(HC_PENC, sizeof(HC_PENC)) + "\n";
+  device_section += "LE_KEY_PID = " + to_hex(HC_PID, sizeof(HC_PID)) + "\n";
+  device_section += "LE_KEY_LENC = " + to_hex(HC_LENC, sizeof(HC_LENC)) + "\n";
+  device_section += "LE_KEY_LID = \n";
+  device_section += "\n";
+
+  // Insert before [Adapter] section (Bluedroid expects device sections first)
+  size_t adapter_pos = config_text.find("[Adapter]");
+  if (adapter_pos != std::string::npos) {
+    config_text.insert(adapter_pos, device_section);
+  } else {
+    config_text += device_section;
+  }
+
+  // Write back
+  nvs_handle_t dst;
+  if (nvs_open("bt_config.conf", NVS_READWRITE, &dst) == ESP_OK) {
+    nvs_set_blob(dst, "bt_cfg_key0", config_text.c_str(), config_text.size());
+    nvs_commit(dst);
+    nvs_close(dst);
+    ESP_LOGW(TAG, "[BOND] Wrote hardcoded bond keys to bt_config.conf (%d bytes)",
+             (int) config_text.size());
+    return true;
+  }
+  return false;
+}
+
+// Restore bt_config.conf from our backup (call BEFORE Bluedroid init).
+// Returns true if restore was performed.
+static bool restore_bt_config_backup_() {
+  nvs_handle_t bak;
+  if (nvs_open("ember_bt_bak", NVS_READONLY, &bak) != ESP_OK) return false;
+  size_t bak_size = 0;
+  if (nvs_get_blob(bak, "bt_cfg_bak", nullptr, &bak_size) != ESP_OK || bak_size == 0) {
+    nvs_close(bak);
+    return false;
+  }
+  uint8_t *bak_buf = (uint8_t *) malloc(bak_size);
+  if (!bak_buf) { nvs_close(bak); return false; }
+  if (nvs_get_blob(bak, "bt_cfg_bak", bak_buf, &bak_size) != ESP_OK) {
+    free(bak_buf);
+    nvs_close(bak);
+    return false;
+  }
+  nvs_close(bak);
+
+  // Check current bt_config.conf size
+  nvs_handle_t cur;
+  size_t cur_size = 0;
+  if (nvs_open("bt_config.conf", NVS_READONLY, &cur) == ESP_OK) {
+    nvs_get_blob(cur, "bt_cfg_key0", nullptr, &cur_size);
+    nvs_close(cur);
+  }
+
+  // Only restore if backup is larger (has device bond sections that got stripped)
+  if (bak_size > cur_size) {
+    nvs_handle_t dst;
+    if (nvs_open("bt_config.conf", NVS_READWRITE, &dst) == ESP_OK) {
+      nvs_set_blob(dst, "bt_cfg_key0", bak_buf, bak_size);
+      nvs_commit(dst);
+      nvs_close(dst);
+      ESP_LOGW(TAG, "[BOND] Restored bt_config.conf from backup (%d->%d bytes)",
+               (int) cur_size, (int) bak_size);
+      free(bak_buf);
+      return true;
+    }
+  }
+  free(bak_buf);
+  return false;
+}
+
+// Save bt_config.conf to our backup namespace (call after successful bonding)
+static void save_bt_config_backup_() {
+  nvs_handle_t src;
+  if (nvs_open("bt_config.conf", NVS_READONLY, &src) != ESP_OK) return;
+  size_t blob_size = 0;
+  if (nvs_get_blob(src, "bt_cfg_key0", nullptr, &blob_size) != ESP_OK || blob_size == 0) {
+    nvs_close(src);
+    return;
+  }
+  uint8_t *buf = (uint8_t *) malloc(blob_size);
+  if (!buf) { nvs_close(src); return; }
+  if (nvs_get_blob(src, "bt_cfg_key0", buf, &blob_size) != ESP_OK) {
+    free(buf);
+    nvs_close(src);
+    return;
+  }
+  nvs_close(src);
+
+  nvs_handle_t dst;
+  if (nvs_open("ember_bt_bak", NVS_READWRITE, &dst) == ESP_OK) {
+    nvs_set_blob(dst, "bt_cfg_bak", buf, blob_size);
+    nvs_commit(dst);
+    nvs_close(dst);
+    ESP_LOGI(TAG, "[BOND] Backed up bt_config.conf (%d bytes)", (int) blob_size);
+  }
+  free(buf);
+}
+
 // Helper: convert a string UUID to esp_bt_uuid_t (128-bit)
 static esp_bt_uuid_t uuid_from_string(const char *uuid_str) {
   auto uuid = espbt::ESPBTUUID::from_raw(std::string(uuid_str));
@@ -102,6 +274,15 @@ static void write_cccd_enable(esp_gatt_if_t gattc_if, uint16_t conn_id, uint16_t
 void EmberOneControl::setup() {
   ESP_LOGI(TAG, "Setting up Ember OneControl BLE hub...");
 
+  // Restore bt_config.conf from backup BEFORE Bluedroid init.
+  // Previous firmware stripped bond data due to io_capability mismatch.
+  // With io_capability: keyboard_display now set at the ESPHome level,
+  // Bluedroid should accept the restored bond data.
+  if (!restore_bt_config_backup_()) {
+    // No backup — try hardcoded keys as last resort
+    write_hardcoded_bond_config_();
+  }
+
   // Try to load a previously paired MAC from NVS
   if (this->load_mac_from_nvs_(this->panel_mac_)) {
     this->has_saved_mac_ = true;
@@ -112,36 +293,6 @@ void EmberOneControl::setup() {
   } else {
     ESP_LOGI(TAG, "No saved panel MAC — press Pair button to begin pairing");
     this->set_auth_state_(AuthState::DISCONNECTED);
-  }
-
-  // Configure BLE security for bonding with Ember panel
-  // PIN-based gateway (0x05C7) requires MITM + KeyboardDisplay capability.
-  // The gateway PIN is used as the BLE passkey during pairing.
-  esp_ble_auth_req_t auth_req = ESP_LE_AUTH_REQ_SC_MITM_BOND;
-  esp_ble_io_cap_t io_cap = ESP_IO_CAP_KBDISP;  // KeyboardDisplay — matches Android/BlueZ agent
-  uint8_t key_size = 16;
-  uint8_t init_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
-  uint8_t rsp_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
-  esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, sizeof(auth_req));
-  esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &io_cap, sizeof(io_cap));
-  esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, sizeof(key_size));
-  esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(init_key));
-  esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(rsp_key));
-  ESP_LOGI(TAG, "BLE security: SC+MITM+Bond (KeyboardDisplay, PIN-based)");
-
-  // Log existing BLE bonds (no longer clearing them — MITM bonds should persist)
-  int bond_num = esp_ble_get_bond_device_num();
-  ESP_LOGI(TAG, "Stored BLE bonds: %d", bond_num);
-  if (bond_num > 0) {
-    esp_ble_bond_dev_t *bond_list = (esp_ble_bond_dev_t *) malloc(bond_num * sizeof(esp_ble_bond_dev_t));
-    if (bond_list && esp_ble_get_bond_device_list(&bond_num, bond_list) == ESP_OK) {
-      for (int i = 0; i < bond_num; i++) {
-        ESP_LOGI(TAG, "  Bond[%d]: %02X:%02X:%02X:%02X:%02X:%02X", i,
-                 bond_list[i].bd_addr[0], bond_list[i].bd_addr[1], bond_list[i].bd_addr[2],
-                 bond_list[i].bd_addr[3], bond_list[i].bd_addr[4], bond_list[i].bd_addr[5]);
-      }
-    }
-    free(bond_list);
   }
 
   // GATT app registration is deferred to loop() because ESP32BLE::ble_setup_()
@@ -174,6 +325,12 @@ void EmberOneControl::loop() {
       this->last_heartbeat_time_ = now;
       this->send_get_devices_();
     }
+  }
+
+  // Delayed bond backup (3s after bonding, so Bluedroid has flushed to NVS)
+  if (this->bond_backup_pending_ && millis() >= this->bond_backup_time_) {
+    this->bond_backup_pending_ = false;
+    save_bt_config_backup_();
   }
 
   // Delayed re-read of UNLOCK_STATUS after key write (500ms delay)
@@ -358,6 +515,35 @@ void EmberOneControl::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
         this->gattc_if_ = gattc_if;
         this->gattc_registered_ = true;
         ESP_LOGI(TAG, "[GATTC] Client registered OK (if=%d)", gattc_if);
+
+        // Belt-and-suspenders: re-affirm security params after Bluedroid init.
+        // ESPHome's esp32_ble: io_capability: keyboard_display handles the default,
+        // but we explicitly set SC+MITM+Bond here as well.
+        esp_ble_auth_req_t auth_req = ESP_LE_AUTH_REQ_SC_MITM_BOND;
+        esp_ble_io_cap_t io_cap = ESP_IO_CAP_KBDISP;
+        uint8_t key_size = 16;
+        uint8_t init_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
+        uint8_t rsp_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
+        esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, sizeof(auth_req));
+        esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &io_cap, sizeof(io_cap));
+        esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, sizeof(key_size));
+        esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(init_key));
+        esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(rsp_key));
+
+        int bond_num = esp_ble_get_bond_device_num();
+        ESP_LOGI(TAG, "BLE security: SC+MITM+Bond (KeyboardDisplay). Stored bonds: %d", bond_num);
+        if (bond_num > 0) {
+          esp_ble_bond_dev_t *bond_list = (esp_ble_bond_dev_t *) malloc(bond_num * sizeof(esp_ble_bond_dev_t));
+          if (bond_list && esp_ble_get_bond_device_list(&bond_num, bond_list) == ESP_OK) {
+            for (int i = 0; i < bond_num; i++) {
+              ESP_LOGI(TAG, "  Bond[%d]: %02X:%02X:%02X:%02X:%02X:%02X", i,
+                       bond_list[i].bd_addr[0], bond_list[i].bd_addr[1], bond_list[i].bd_addr[2],
+                       bond_list[i].bd_addr[3], bond_list[i].bd_addr[4], bond_list[i].bd_addr[5]);
+            }
+          }
+          free(bond_list);
+        }
+
         if (this->has_saved_mac_) {
           this->connect_to_device_(this->panel_mac_);
         }
@@ -373,9 +559,9 @@ void EmberOneControl::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
       if (param->open.status == ESP_GATT_OK) {
         this->conn_id_ = param->open.conn_id;
         this->set_auth_state_(AuthState::CONNECTED);
-        // Request MITM-level encryption — required for PIN-based gateway
-        // This triggers bonding with passkey exchange if no bond exists
-        ESP_LOGI(TAG, "[GATTC] Requesting BLE encryption (MITM)...");
+
+        // Request MITM encryption — panel requires auth_mode=9 (SC_MITM_BOND).
+        ESP_LOGI(TAG, "[GATTC] Requesting BLE MITM encryption...");
         esp_err_t ret = esp_ble_set_encryption(param->open.remote_bda, ESP_BLE_SEC_ENCRYPT_MITM);
         ESP_LOGI(TAG, "[GATTC] esp_ble_set_encryption returned: %s", esp_err_to_name(ret));
       } else {
@@ -594,6 +780,7 @@ void EmberOneControl::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
       this->data_read_properties_ = 0;
       this->unlock_reread_pending_ = false;
       this->last_heartbeat_time_ = 0;
+      this->metadata_requested_ = false;
       this->cobs_decoder_.reset();
       this->set_auth_state_(this->has_saved_mac_ ? AuthState::SCANNING : AuthState::DISCONNECTED);
       break;
@@ -619,7 +806,12 @@ void EmberOneControl::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_ga
                auth.success, auth.bd_addr[0], auth.bd_addr[1], auth.bd_addr[2],
                auth.bd_addr[3], auth.bd_addr[4], auth.bd_addr[5], auth.auth_mode);
       if (auth.success) {
-        ESP_LOGI(TAG, "[GAP] Bonding SUCCESS! key_present=%d key_type=%d", auth.key_present, auth.key_type);
+        ESP_LOGI(TAG, "[GAP] Bonding SUCCESS! auth_mode=%d", auth.auth_mode);
+        int post_bond_num = esp_ble_get_bond_device_num();
+        ESP_LOGI(TAG, "[GAP] Post-bond device count: %d", post_bond_num);
+        // Schedule backup of bond data (3s delay for Bluedroid NVS flush)
+        this->bond_backup_pending_ = true;
+        this->bond_backup_time_ = millis() + 3000;
         // Request MTU upgrade (reference uses 185, default is 23)
         ESP_LOGI(TAG, "[GAP] Requesting MTU=185...");
         esp_ble_gattc_send_mtu_req(this->gattc_if_, this->conn_id_);
@@ -629,14 +821,8 @@ void EmberOneControl::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_ga
                  auth.fail_reason, auth.auth_mode);
         // Do NOT remove bond device here — stored keys may still be valid
         // on a subsequent attempt. Only clear bonds on explicit user action.
-        // Try service discovery anyway — some panels allow GATT access without bonding
-        if (this->gattc_if_ != 0 && this->auth_state_ >= AuthState::CONNECTED) {
-          ESP_LOGW(TAG, "[GAP] Attempting service discovery without bonding...");
-          esp_ble_gattc_search_service(this->gattc_if_, this->conn_id_, nullptr);
-        } else {
-          this->reconnect_cooldown_until_ = millis() + 10000;
-          this->disconnect_();
-        }
+        this->reconnect_cooldown_until_ = millis() + 10000;
+        this->disconnect_();
       }
       break;
     }
@@ -707,6 +893,7 @@ void EmberOneControl::disconnect_() {
   this->data_read_properties_ = 0;
   this->unlock_reread_pending_ = false;
   this->last_heartbeat_time_ = 0;
+  this->metadata_requested_ = false;
   this->cobs_decoder_.reset();
   this->set_auth_state_(AuthState::DISCONNECTED);
 }
@@ -821,8 +1008,7 @@ void EmberOneControl::handle_seed_notification_(const uint8_t *data, size_t len)
   // Data events should start flowing now.
   ESP_LOGI(TAG, "Step 2: Auth key sent — authentication complete!");
   this->set_auth_state_(AuthState::AUTHENTICATED);
-  // Send initial GetDevicesMetadata to populate device info
-  this->send_get_devices_metadata_();
+  // Metadata request is triggered by the gateway info handler after first GetDevices heartbeat
 }
 
 void EmberOneControl::enable_data_notifications_() {
@@ -924,6 +1110,14 @@ bool EmberOneControl::load_mac_from_nvs_(uint8_t *mac) {
 // Event processing (working — carried over from previous implementation)
 // ---------------------------------------------------------------------------
 
+DeviceAddress EmberOneControl::resolve_address(uint16_t function_name) const {
+  auto it = this->function_name_map_.find(function_name);
+  if (it != this->function_name_map_.end()) {
+    return it->second;
+  }
+  return 0;
+}
+
 void EmberOneControl::process_decoded_frame_(const std::vector<uint8_t> &frame) {
   if (frame.empty()) return;
 
@@ -940,6 +1134,14 @@ void EmberOneControl::process_decoded_frame_(const std::vector<uint8_t> &frame) 
       if (this->auth_state_ != AuthState::AUTHENTICATED) {
         this->set_auth_state_(AuthState::AUTHENTICATED);
       }
+      // Request metadata after first gateway info if not yet done
+      if (!this->metadata_requested_) {
+        this->metadata_requested_ = true;
+        this->send_get_devices_metadata_();
+      }
+      break;
+    case EVENT_DEVICE_COMMAND:
+      this->handle_command_response_(data, len);
       break;
     case EVENT_RELAY_LATCHING_STATUS_TYPE1:
     case EVENT_RELAY_LATCHING_STATUS_TYPE2:
@@ -1051,6 +1253,75 @@ void EmberOneControl::handle_hbridge_status_(const uint8_t *data, size_t len) {
   ESP_LOGD(TAG, "H-Bridge status: 0x%04X status=%d pos=%d", addr, status, position);
   for (auto &cb : this->hbridge_callbacks_) {
     cb(addr, status, position);
+  }
+}
+
+void EmberOneControl::handle_command_response_(const uint8_t *data, size_t len) {
+  // Format: [0x02][cmdIdLo][cmdIdHi][respType][tableId][startId][count][entries...]
+  if (len < 7) return;
+
+  uint8_t resp_type = data[3];
+  // resp_type 0x01 = partial data, 0x81 = complete
+  if (resp_type == 0x81) {
+    // Completion frame — metadata fetch done.
+    // Don't trigger another GetDevices here — the 5s heartbeat will naturally
+    // deliver fresh state now that metadata_received_ is true and
+    // resolve_address() can match callbacks.
+    ESP_LOGI(TAG, "Metadata fetch complete (%d function names mapped)",
+             this->function_name_map_.size());
+    return;
+  }
+  if (resp_type != 0x01) {
+    ESP_LOGD(TAG, "Command response type: 0x%02X (not metadata data)", resp_type);
+    return;
+  }
+
+  uint8_t table_id = data[4];
+  uint8_t start_id = data[5];
+  uint8_t count = data[6];
+
+  ESP_LOGI(TAG, "Metadata response: table=0x%02X start=%d count=%d (%d bytes)", table_id, start_id, count, len);
+
+  size_t offset = 7;
+  int index = 0;
+
+  while (index < count && offset + 2 < len) {
+    uint8_t protocol = data[offset];
+    uint8_t payload_size = data[offset + 1];
+    size_t entry_size = payload_size + 2;
+
+    if (offset + entry_size > len) {
+      ESP_LOGW(TAG, "Metadata entry overflows (need %d, have %d)", offset + entry_size, len);
+      break;
+    }
+
+    uint8_t device_id = (start_id + index) & 0xFF;
+    DeviceAddress device_addr = (table_id << 8) | device_id;
+
+    if ((protocol == 1 || protocol == 2) && payload_size == 17) {
+      // Function name is BIG-ENDIAN
+      uint16_t func_name = (data[offset + 2] << 8) | data[offset + 3];
+      uint8_t func_instance = data[offset + 4];
+      uint8_t capability = data[offset + 5];
+
+      this->function_name_map_[func_name] = device_addr;
+      ESP_LOGI(TAG, "  [%d:0x%02X] func=%d inst=%d cap=0x%02X → addr=0x%04X",
+               table_id, device_id, func_name, func_instance, capability, device_addr);
+    } else if (protocol == 1 && payload_size == 0) {
+      // Host/Gateway proxy — default function 323 (Gateway RVLink)
+      this->function_name_map_[FUNC_GATEWAY_RVLINK] = device_addr;
+      ESP_LOGI(TAG, "  [%d:0x%02X] Gateway (host default) → addr=0x%04X", table_id, device_id, device_addr);
+    } else {
+      ESP_LOGD(TAG, "  [%d:0x%02X] skipped: proto=%d payload=%d", table_id, device_id, protocol, payload_size);
+    }
+
+    offset += entry_size;
+    index++;
+  }
+
+  if (!this->function_name_map_.empty()) {
+    this->metadata_received_ = true;
+    ESP_LOGI(TAG, "Metadata: %d function names resolved", this->function_name_map_.size());
   }
 }
 

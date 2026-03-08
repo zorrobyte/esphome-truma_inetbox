@@ -9,13 +9,26 @@ static const char *TAG = "ember_light";
 
 void EmberLight::setup() {
   auto *hub = this->parent_;
+  this->function_name_ = this->get_function_name_for_type_();
 
   hub->register_relay_callback([this](DeviceAddress addr, bool is_on) {
     if (this->explicit_ids_) {
       DeviceAddress my_addr = (this->table_id_ << 8) | this->device_id_;
       if (addr != my_addr) return;
+    } else if (this->function_name_ != 0) {
+      DeviceAddress my_addr = this->parent_->resolve_address(this->function_name_);
+      if (my_addr == 0 || addr != my_addr) return;
+    } else {
+      return;
     }
-    this->current_state_ = is_on;
+    if (this->current_state_ != is_on) {
+      this->current_state_ = is_on;
+      if (this->light_state_ != nullptr) {
+        auto call = this->light_state_->make_call();
+        call.set_state(is_on);
+        call.perform();
+      }
+    }
   });
 }
 
@@ -37,12 +50,29 @@ void EmberLight::write_state(light::LightState *state) {
   bool binary;
   state->current_values_as_binary(&binary);
 
+  // Skip if state already matches (callback-driven update, no need to re-send)
+  if (binary == this->current_state_) return;
+
+  uint8_t tbl = this->table_id_;
+  uint8_t dev = this->device_id_;
+
   if (!this->explicit_ids_) {
-    ESP_LOGW(TAG, "No table_id/device_id configured - cannot send command");
-    return;
+    if (this->function_name_ != 0) {
+      DeviceAddress addr = this->parent_->resolve_address(this->function_name_);
+      if (addr != 0) {
+        tbl = (addr >> 8) & 0xFF;
+        dev = addr & 0xFF;
+      } else {
+        ESP_LOGW(TAG, "Metadata not yet received - cannot send command");
+        return;
+      }
+    } else {
+      ESP_LOGW(TAG, "No table_id/device_id configured - cannot send command");
+      return;
+    }
   }
 
-  this->parent_->send_switch_command(this->table_id_, this->device_id_, binary);
+  this->parent_->send_switch_command(tbl, dev, binary);
   this->current_state_ = binary;
 }
 

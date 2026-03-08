@@ -9,6 +9,8 @@ namespace ember_onecontrol {
 
 enum class EMBER_SWITCH_TYPE : uint8_t {
   WATER_PUMP,
+  SLIDE,
+  AWNING,
 };
 
 class EmberSwitch : public Component, public switch_::Switch, public Parented<EmberOneControl> {
@@ -27,6 +29,20 @@ class EmberSwitch : public Component, public switch_::Switch, public Parented<Em
   uint8_t table_id_{0};
   uint8_t device_id_{0};
   bool explicit_ids_{false};
+  uint16_t function_name_{0};
+
+  bool is_hbridge_type_() const {
+    return this->type_ == EMBER_SWITCH_TYPE::SLIDE || this->type_ == EMBER_SWITCH_TYPE::AWNING;
+  }
+
+  uint16_t get_function_name_for_type_() const {
+    switch (this->type_) {
+      case EMBER_SWITCH_TYPE::WATER_PUMP: return 5;
+      case EMBER_SWITCH_TYPE::SLIDE: return 96;
+      case EMBER_SWITCH_TYPE::AWNING: return 105;
+      default: return 0;
+    }
+  }
 };
 
 }  // namespace ember_onecontrol

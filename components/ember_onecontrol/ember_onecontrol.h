@@ -10,11 +10,14 @@
 #include <vector>
 #include <functional>
 #include <string>
+#include <map>
 
 #ifdef USE_ESP32
 #include <esp_gattc_api.h>
 #include <esp_bt_defs.h>
 #include <esp_gap_ble_api.h>
+#include <nvs_flash.h>
+#include <nvs.h>
 #endif
 
 namespace esphome {
@@ -82,6 +85,10 @@ class EmberOneControl : public PollingComponent,
   // Send a switch command
   void send_switch_command(uint8_t table_id, uint8_t device_id, bool turn_on);
 
+  // Metadata resolution: returns DeviceAddress for a function_name, or 0 if unknown
+  DeviceAddress resolve_address(uint16_t function_name) const;
+  bool has_metadata() const { return this->metadata_received_; }
+
   AuthState get_auth_state() const { return this->auth_state_; }
   float get_battery_voltage() const { return this->battery_voltage_; }
   const std::string &get_battery_status() const { return this->battery_status_; }
@@ -114,6 +121,7 @@ class EmberOneControl : public PollingComponent,
   void handle_tank_status_v2_(const uint8_t *data, size_t len);
   void handle_hbridge_status_(const uint8_t *data, size_t len);
   void handle_gateway_info_(const uint8_t *data, size_t len);
+  void handle_command_response_(const uint8_t *data, size_t len);
   void send_command_(const std::vector<uint8_t> &raw_command);
 
   // NVS persistence
@@ -152,8 +160,12 @@ class EmberOneControl : public PollingComponent,
   bool unlock_reread_pending_{false};
   uint32_t unlock_reread_time_{0};
 
+  // Delayed NVS bond check (3s after bonding to verify persistence)
+
   // Reconnect backoff
   uint32_t reconnect_cooldown_until_{0};
+  bool bond_backup_pending_{false};
+  uint32_t bond_backup_time_{0};
 
   // Heartbeat timer (GetDevices every 5s to keep connection alive)
   uint32_t last_heartbeat_time_{0};
@@ -165,12 +177,22 @@ class EmberOneControl : public PollingComponent,
   uint8_t device_table_id_{0};
   uint8_t auth_key_[16]{};
 
+  // Metadata: function_name → DeviceAddress
+  std::map<uint16_t, DeviceAddress> function_name_map_;
+  bool metadata_received_{false};
+  bool metadata_requested_{false};
+
   // Cached values
   float battery_voltage_{0.0f};
   std::string battery_status_{"Unknown"};
 
   // NVS preferences
   ESPPreferenceObject pref_;
+
+  // GAP callback wrapper for KEY_EVT interception
+  static EmberOneControl *instance_;
+  static void gap_cb_wrapper_(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
+  bool gap_wrapper_installed_{false};
 
   // Callbacks
   std::vector<RelayCallback> relay_callbacks_;

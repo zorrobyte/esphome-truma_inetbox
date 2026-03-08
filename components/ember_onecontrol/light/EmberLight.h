@@ -19,6 +19,7 @@ class EmberLight : public Component, public light::LightOutput, public Parented<
  public:
   void setup() override;
   void dump_config() override;
+  void setup_state(light::LightState *state) override { this->light_state_ = state; }
 
   light::LightTraits get_traits() override;
   void write_state(light::LightState *state) override;
@@ -33,6 +34,19 @@ class EmberLight : public Component, public light::LightOutput, public Parented<
   uint8_t device_id_{0};
   bool explicit_ids_{false};
   bool current_state_{false};
+  uint16_t function_name_{0};
+  light::LightState *light_state_{nullptr};
+
+  uint16_t get_function_name_for_type_() const {
+    switch (this->type_) {
+      case EMBER_LIGHT_TYPE::CEILING_LIGHT: return 61;
+      case EMBER_LIGHT_TYPE::AWNING_LIGHT: return 49;
+      case EMBER_LIGHT_TYPE::STEP_LIGHT: return 170;
+      case EMBER_LIGHT_TYPE::ACCENT_LIGHT: return 220;
+      case EMBER_LIGHT_TYPE::PUMP_LIGHT: return 0;  // No standard function name
+      default: return 0;
+    }
+  }
 };
 
 }  // namespace ember_onecontrol

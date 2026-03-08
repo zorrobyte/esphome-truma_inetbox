@@ -90,5 +90,20 @@ std::vector<uint8_t> build_get_devices_metadata(uint16_t command_id, uint8_t tab
 std::vector<uint8_t> build_action_switch(uint16_t command_id, uint8_t table_id,
                                           bool turn_on, const std::vector<uint8_t> &device_ids);
 
+// Ember function names (IDS CAN protocol, from Lippert/LCI)
+enum EmberFunctionName : uint16_t {
+  FUNC_WATER_PUMP = 5,
+  FUNC_AWNING_LIGHT = 49,
+  FUNC_CEILING_LIGHT = 61,
+  FUNC_FRESH_TANK = 67,
+  FUNC_GREY_TANK = 68,
+  FUNC_BLACK_TANK = 69,
+  FUNC_SLIDE = 96,
+  FUNC_AWNING = 105,
+  FUNC_STEP_LIGHT = 170,
+  FUNC_ACCENT_LIGHT = 220,
+  FUNC_GATEWAY_RVLINK = 323,
+};
+
 }  // namespace ember_onecontrol
 }  // namespace esphome

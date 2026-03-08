@@ -9,6 +9,7 @@ static const char *TAG = "ember_sensor";
 
 void EmberSensor::setup() {
   auto *hub = this->parent_;
+  this->function_name_ = this->get_function_name_for_type_();
 
   if (this->type_ == EMBER_SENSOR_TYPE::BATTERY_VOLTAGE) {
     hub->register_rv_status_callback([this](float voltage) {
@@ -20,6 +21,11 @@ void EmberSensor::setup() {
       if (this->explicit_ids_) {
         DeviceAddress my_addr = (this->table_id_ << 8) | this->device_id_;
         if (addr != my_addr) return;
+      } else if (this->function_name_ != 0) {
+        DeviceAddress my_addr = this->parent_->resolve_address(this->function_name_);
+        if (my_addr == 0 || addr != my_addr) return;
+      } else {
+        return;  // No way to identify this sensor
       }
       this->publish_state((float) percent);
     });

@@ -5,7 +5,7 @@ esphome:
 esp32:
   board: esp32-s3-devkitc-1
   framework:
-    type: arduino
+    type: esp-idf
 
 external_components:
   - source:
@@ -121,6 +121,9 @@ truma_inetbox:
 # ---------------------------------------------------------
 # EMBER ONECONTROL (BLE)
 # ---------------------------------------------------------
+esp32_ble:
+  io_capability: keyboard_display
+
 esp32_ble_tracker:
 
 ember_onecontrol:
@@ -138,10 +141,12 @@ number:
     name: "Target Water Temperature"
     type: TARGET_WATER_TEMPERATURE
 
-# Ember pairing button
+# Ember pairing button + device restart
 button:
   - platform: ember_onecontrol
     name: "Ember Start Pairing"
+  - platform: restart
+    name: "Restart Device"
 
 # Ember lights
 light:
@@ -154,9 +159,6 @@ light:
   - platform: ember_onecontrol
     name: "Step Light"
     type: STEP_LIGHT
-  - platform: ember_onecontrol
-    name: "Pump Light"
-    type: PUMP_LIGHT
   - platform: ember_onecontrol
     name: "Awning Light"
     type: AWNING_LIGHT
@@ -357,6 +359,12 @@ switch:
   - platform: ember_onecontrol
     name: "Water Pump"
     type: WATER_PUMP
+  - platform: ember_onecontrol
+    name: "Slide"
+    type: SLIDE
+  - platform: ember_onecontrol
+    name: "Awning"
+    type: AWNING
 
   # Truma
   - platform: template
