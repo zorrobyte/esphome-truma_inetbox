@@ -12,175 +12,6 @@ static const char *TAG = "ember_onecontrol";
 // Static instance for GAP callback wrapper
 EmberOneControl *EmberOneControl::instance_ = nullptr;
 
-// Hardcoded bond keys for panel 94:B5:55:9C:24:FE (captured 2026-03-08).
-// Used as last-resort fallback if NVS backup is missing.
-static const uint8_t HC_PANEL_ADDR[] = {0x94, 0xB5, 0x55, 0x9C, 0x24, 0xFE};
-static const uint8_t HC_PENC[] = {
-  0x61,0xf4,0x3b,0x76,0xac,0x8d,0xa3,0x56,0x79,0x67,0x30,0xcf,0x46,0x6e,0xe7,0x1f,
-  0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00, 0x01, 0x10};
-static const uint8_t HC_PID[] = {
-  0xe5,0x26,0xe7,0xf2,0x06,0xb9,0xe8,0x09,0x3d,0x9d,0x4c,0xc2,0x6a,0x07,0x78,0xd3,
-  0x00, 0x94,0xb5,0x55,0x9c,0x24,0xfe};
-static const uint8_t HC_LENC[] = {
-  0x61,0xf4,0x3b,0x76,0xac,0x8d,0xa3,0x56,0x79,0x67,0x30,0xcf,0x46,0x6e,0xe7,0x1f,
-  0x00,0x00, 0x10, 0x01};
-
-// Write hardcoded bond keys into bt_config.conf as INI text.
-// This constructs the same format Bluedroid uses natively.
-static bool write_hardcoded_bond_config_() {
-  // First read existing config to get the [Adapter] section
-  nvs_handle_t src;
-  std::string config_text;
-
-  if (nvs_open("bt_config.conf", NVS_READONLY, &src) == ESP_OK) {
-    size_t blob_size = 0;
-    if (nvs_get_blob(src, "bt_cfg_key0", nullptr, &blob_size) == ESP_OK && blob_size > 0) {
-      char *buf = (char *) malloc(blob_size + 1);
-      if (buf && nvs_get_blob(src, "bt_cfg_key0", buf, &blob_size) == ESP_OK) {
-        buf[blob_size] = '\0';
-        config_text = buf;
-      }
-      free(buf);
-    }
-    nvs_close(src);
-  }
-
-  if (config_text.empty()) {
-    ESP_LOGW(TAG, "[BOND] No existing bt_config.conf — cannot inject hardcoded keys");
-    return false;
-  }
-
-  // Build hex strings from binary key data
-  auto to_hex = [](const uint8_t *data, size_t len) -> std::string {
-    std::string result;
-    result.reserve(len * 2);
-    for (size_t i = 0; i < len; i++) {
-      char hex[3];
-      snprintf(hex, sizeof(hex), "%02x", data[i]);
-      result += hex;
-    }
-    return result;
-  };
-
-  // Build device section
-  char mac_section[24];
-  snprintf(mac_section, sizeof(mac_section), "[%02x:%02x:%02x:%02x:%02x:%02x]",
-           HC_PANEL_ADDR[0], HC_PANEL_ADDR[1], HC_PANEL_ADDR[2],
-           HC_PANEL_ADDR[3], HC_PANEL_ADDR[4], HC_PANEL_ADDR[5]);
-
-  // Check if device section already exists
-  if (config_text.find(mac_section) != std::string::npos) {
-    ESP_LOGI(TAG, "[BOND] Device section already in config");
-    return false;
-  }
-
-  // Prepend device section (Bluedroid format: device section first, then [Adapter])
-  // Find [Adapter] section and insert device section before it
-  std::string device_section;
-  device_section += mac_section;
-  device_section += "\n";
-  device_section += "AddrType = 0\n";
-  device_section += "AuthMode = 9\n";
-  device_section += "DevType = 2\n";
-  device_section += "LE_KEY_PENC = " + to_hex(HC_PENC, sizeof(HC_PENC)) + "\n";
-  device_section += "LE_KEY_PID = " + to_hex(HC_PID, sizeof(HC_PID)) + "\n";
-  device_section += "LE_KEY_LENC = " + to_hex(HC_LENC, sizeof(HC_LENC)) + "\n";
-  device_section += "LE_KEY_LID = \n";
-  device_section += "\n";
-
-  // Insert before [Adapter] section (Bluedroid expects device sections first)
-  size_t adapter_pos = config_text.find("[Adapter]");
-  if (adapter_pos != std::string::npos) {
-    config_text.insert(adapter_pos, device_section);
-  } else {
-    config_text += device_section;
-  }
-
-  // Write back
-  nvs_handle_t dst;
-  if (nvs_open("bt_config.conf", NVS_READWRITE, &dst) == ESP_OK) {
-    nvs_set_blob(dst, "bt_cfg_key0", config_text.c_str(), config_text.size());
-    nvs_commit(dst);
-    nvs_close(dst);
-    ESP_LOGW(TAG, "[BOND] Wrote hardcoded bond keys to bt_config.conf (%d bytes)",
-             (int) config_text.size());
-    return true;
-  }
-  return false;
-}
-
-// Restore bt_config.conf from our backup (call BEFORE Bluedroid init).
-// Returns true if restore was performed.
-static bool restore_bt_config_backup_() {
-  nvs_handle_t bak;
-  if (nvs_open("ember_bt_bak", NVS_READONLY, &bak) != ESP_OK) return false;
-  size_t bak_size = 0;
-  if (nvs_get_blob(bak, "bt_cfg_bak", nullptr, &bak_size) != ESP_OK || bak_size == 0) {
-    nvs_close(bak);
-    return false;
-  }
-  uint8_t *bak_buf = (uint8_t *) malloc(bak_size);
-  if (!bak_buf) { nvs_close(bak); return false; }
-  if (nvs_get_blob(bak, "bt_cfg_bak", bak_buf, &bak_size) != ESP_OK) {
-    free(bak_buf);
-    nvs_close(bak);
-    return false;
-  }
-  nvs_close(bak);
-
-  // Check current bt_config.conf size
-  nvs_handle_t cur;
-  size_t cur_size = 0;
-  if (nvs_open("bt_config.conf", NVS_READONLY, &cur) == ESP_OK) {
-    nvs_get_blob(cur, "bt_cfg_key0", nullptr, &cur_size);
-    nvs_close(cur);
-  }
-
-  // Only restore if backup is larger (has device bond sections that got stripped)
-  if (bak_size > cur_size) {
-    nvs_handle_t dst;
-    if (nvs_open("bt_config.conf", NVS_READWRITE, &dst) == ESP_OK) {
-      nvs_set_blob(dst, "bt_cfg_key0", bak_buf, bak_size);
-      nvs_commit(dst);
-      nvs_close(dst);
-      ESP_LOGW(TAG, "[BOND] Restored bt_config.conf from backup (%d->%d bytes)",
-               (int) cur_size, (int) bak_size);
-      free(bak_buf);
-      return true;
-    }
-  }
-  free(bak_buf);
-  return false;
-}
-
-// Save bt_config.conf to our backup namespace (call after successful bonding)
-static void save_bt_config_backup_() {
-  nvs_handle_t src;
-  if (nvs_open("bt_config.conf", NVS_READONLY, &src) != ESP_OK) return;
-  size_t blob_size = 0;
-  if (nvs_get_blob(src, "bt_cfg_key0", nullptr, &blob_size) != ESP_OK || blob_size == 0) {
-    nvs_close(src);
-    return;
-  }
-  uint8_t *buf = (uint8_t *) malloc(blob_size);
-  if (!buf) { nvs_close(src); return; }
-  if (nvs_get_blob(src, "bt_cfg_key0", buf, &blob_size) != ESP_OK) {
-    free(buf);
-    nvs_close(src);
-    return;
-  }
-  nvs_close(src);
-
-  nvs_handle_t dst;
-  if (nvs_open("ember_bt_bak", NVS_READWRITE, &dst) == ESP_OK) {
-    nvs_set_blob(dst, "bt_cfg_bak", buf, blob_size);
-    nvs_commit(dst);
-    nvs_close(dst);
-    ESP_LOGI(TAG, "[BOND] Backed up bt_config.conf (%d bytes)", (int) blob_size);
-  }
-  free(buf);
-}
-
 // Helper: convert a string UUID to esp_bt_uuid_t (128-bit)
 static esp_bt_uuid_t uuid_from_string(const char *uuid_str) {
   auto uuid = espbt::ESPBTUUID::from_raw(std::string(uuid_str));
@@ -216,10 +47,8 @@ static CharInfo find_char_info(esp_gatt_if_t gattc_if, uint16_t conn_id,
                                             svc_result.start_handle, svc_result.end_handle,
                                             char_uuid, &char_result, &char_count);
   if (status == ESP_OK && char_count > 0) {
-    ESP_LOGI(TAG, "Char %s: handle=0x%04X properties=0x%02X (N=%d I=%d)",
-             char_uuid_str, char_result.char_handle, char_result.properties,
-             (char_result.properties & ESP_GATT_CHAR_PROP_BIT_NOTIFY) ? 1 : 0,
-             (char_result.properties & ESP_GATT_CHAR_PROP_BIT_INDICATE) ? 1 : 0);
+    ESP_LOGD(TAG, "Char %s: handle=0x%04X props=0x%02X",
+             char_uuid_str, char_result.char_handle, char_result.properties);
     return {char_result.char_handle, (uint8_t) char_result.properties};
   }
   ESP_LOGW(TAG, "Characteristic not found: %s in service %s", char_uuid_str, svc_uuid_str);
@@ -256,12 +85,11 @@ static void write_cccd_enable(esp_gatt_if_t gattc_if, uint16_t conn_id, uint16_t
     // Prefer indications if available (some Ember characteristics only support indicate)
     cccd_val[0] = 0x02;
     cccd_val[1] = 0x00;
-    ESP_LOGI(TAG, "Writing CCCD 0x0002 (INDICATE) to handle 0x%04X", cccd_handle);
+    ESP_LOGD(TAG, "Writing CCCD INDICATE to handle 0x%04X", cccd_handle);
   } else {
-    // Fall back to notifications
     cccd_val[0] = 0x01;
     cccd_val[1] = 0x00;
-    ESP_LOGI(TAG, "Writing CCCD 0x0001 (NOTIFY) to handle 0x%04X", cccd_handle);
+    ESP_LOGD(TAG, "Writing CCCD NOTIFY to handle 0x%04X", cccd_handle);
   }
   esp_ble_gattc_write_char_descr(gattc_if, conn_id, cccd_handle,
                                   2, cccd_val, ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_NONE);
@@ -274,14 +102,9 @@ static void write_cccd_enable(esp_gatt_if_t gattc_if, uint16_t conn_id, uint16_t
 void EmberOneControl::setup() {
   ESP_LOGI(TAG, "Setting up Ember OneControl BLE hub...");
 
-  // Restore bt_config.conf from backup BEFORE Bluedroid init.
-  // Previous firmware stripped bond data due to io_capability mismatch.
-  // With io_capability: keyboard_display now set at the ESPHome level,
-  // Bluedroid should accept the restored bond data.
-  if (!restore_bt_config_backup_()) {
-    // No backup — try hardcoded keys as last resort
-    write_hardcoded_bond_config_();
-  }
+  // Bond persistence is handled by ESPHome's esp32_ble io_capability: keyboard_display
+  // setting, which ensures Bluedroid's security config matches what was used during
+  // bonding. No manual NVS backup/restore needed.
 
   // Try to load a previously paired MAC from NVS
   if (this->load_mac_from_nvs_(this->panel_mac_)) {
@@ -327,18 +150,12 @@ void EmberOneControl::loop() {
     }
   }
 
-  // Delayed bond backup (3s after bonding, so Bluedroid has flushed to NVS)
-  if (this->bond_backup_pending_ && millis() >= this->bond_backup_time_) {
-    this->bond_backup_pending_ = false;
-    save_bt_config_backup_();
-  }
-
   // Delayed re-read of UNLOCK_STATUS after key write (500ms delay)
   if (this->unlock_reread_pending_ && (millis() - this->unlock_reread_time_ >= 500)) {
     this->unlock_reread_pending_ = false;
     if (this->unlock_status_handle_ != 0 && this->gattc_if_ != 0 &&
         this->auth_state_ >= AuthState::CONNECTED) {
-      ESP_LOGI(TAG, "Re-reading UNLOCK_STATUS after key write (conn_id=%d)...", this->conn_id_);
+      ESP_LOGD(TAG, "Re-reading UNLOCK_STATUS after key write");
       esp_ble_gattc_read_char(this->gattc_if_, this->conn_id_, this->unlock_status_handle_,
                               ESP_GATT_AUTH_REQ_NONE);
     }
@@ -374,7 +191,7 @@ void EmberOneControl::dump_config() {
 
 void EmberOneControl::set_auth_state_(AuthState state) {
   if (this->auth_state_ == state) return;
-  ESP_LOGI(TAG, "Auth state: %d -> %d", (int) this->auth_state_, (int) state);
+  ESP_LOGD(TAG, "Auth state: %d -> %d", (int) this->auth_state_, (int) state);
   this->auth_state_ = state;
   for (auto &cb : this->auth_state_callbacks_) {
     cb(state);
@@ -401,7 +218,7 @@ bool EmberOneControl::parse_device(const esp32_ble_tracker::ESPBTDevice &device)
       saved = (saved << 8) | this->panel_mac_[i];
     }
     if (addr == saved) {
-      ESP_LOGI(TAG, "Found saved panel, connecting...");
+      ESP_LOGD(TAG, "Found saved panel, connecting...");
       this->connect_to_device_(this->panel_mac_);
       return true;
     }
@@ -498,15 +315,10 @@ void EmberOneControl::clear_paired_device() {
 
 void EmberOneControl::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
                                            esp_ble_gattc_cb_param_t *param) {
-  // Log ALL events for debugging (filter by our app only after REG)
   if (event == ESP_GATTC_REG_EVT) {
-    ESP_LOGI(TAG, "[GATTC] REG_EVT: app_id=%d status=%d gattc_if=%d",
-             param->reg.app_id, param->reg.status, gattc_if);
     if (param->reg.app_id != EMBER_GATTC_APP_ID) return;
   } else {
-    // Log all events for our interface, with event number for unknowns
     if (gattc_if != this->gattc_if_) return;
-    ESP_LOGD(TAG, "[GATTC] event=%d gattc_if=%d conn_id=%d", (int) event, (int) gattc_if, (int) this->conn_id_);
   }
 
   switch (event) {
@@ -554,16 +366,14 @@ void EmberOneControl::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
     }
 
     case ESP_GATTC_OPEN_EVT: {
-      ESP_LOGI(TAG, "[GATTC] OPEN_EVT: status=%d conn_id=%d mtu=%d",
+      ESP_LOGD(TAG, "[GATTC] OPEN_EVT: status=%d conn_id=%d mtu=%d",
                param->open.status, param->open.conn_id, param->open.mtu);
       if (param->open.status == ESP_GATT_OK) {
         this->conn_id_ = param->open.conn_id;
         this->set_auth_state_(AuthState::CONNECTED);
 
-        // Request MITM encryption — panel requires auth_mode=9 (SC_MITM_BOND).
-        ESP_LOGI(TAG, "[GATTC] Requesting BLE MITM encryption...");
-        esp_err_t ret = esp_ble_set_encryption(param->open.remote_bda, ESP_BLE_SEC_ENCRYPT_MITM);
-        ESP_LOGI(TAG, "[GATTC] esp_ble_set_encryption returned: %s", esp_err_to_name(ret));
+        ESP_LOGD(TAG, "[GATTC] Requesting MITM encryption...");
+        esp_ble_set_encryption(param->open.remote_bda, ESP_BLE_SEC_ENCRYPT_MITM);
       } else {
         ESP_LOGW(TAG, "[GATTC] Connection FAILED: status=%d — cooldown 5s", param->open.status);
         this->reconnect_cooldown_until_ = millis() + 5000;
@@ -572,26 +382,14 @@ void EmberOneControl::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
       break;
     }
 
-    case ESP_GATTC_CONNECT_EVT: {
-      ESP_LOGI(TAG, "[GATTC] CONNECT_EVT: conn_id=%d link_role=%d remote_bda=%02X:%02X:%02X:%02X:%02X:%02X",
-               param->connect.conn_id, param->connect.link_role,
-               param->connect.remote_bda[0], param->connect.remote_bda[1],
-               param->connect.remote_bda[2], param->connect.remote_bda[3],
-               param->connect.remote_bda[4], param->connect.remote_bda[5]);
+    case ESP_GATTC_CONNECT_EVT:
       break;
-    }
 
-    case ESP_GATTC_SEARCH_RES_EVT: {
-      ESP_LOGI(TAG, "[GATTC] SEARCH_RES: start=0x%04X end=0x%04X uuid_len=%d",
-               param->search_res.start_handle, param->search_res.end_handle,
-               param->search_res.srvc_id.uuid.len);
+    case ESP_GATTC_SEARCH_RES_EVT:
       break;
-    }
 
     case ESP_GATTC_SEARCH_CMPL_EVT: {
-      ESP_LOGI(TAG, "[GATTC] SEARCH_CMPL: status=%d conn_id=%d searched_service_source=%d",
-               param->search_cmpl.status, param->search_cmpl.conn_id,
-               param->search_cmpl.searched_service_source);
+      ESP_LOGD(TAG, "[GATTC] Service discovery complete: status=%d", param->search_cmpl.status);
       if (param->search_cmpl.status != ESP_GATT_OK) {
         ESP_LOGE(TAG, "[GATTC] Service search FAILED: %d", param->search_cmpl.status);
         this->disconnect_();
@@ -623,36 +421,23 @@ void EmberOneControl::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
         this->data_read_properties_ = dread_info.properties;
       }
 
-      ESP_LOGI(TAG, "[GATTC] Handles: unlock=0x%04X key=0x%04X seed=0x%04X(prop=0x%02X) dwrite=0x%04X dread=0x%04X(prop=0x%02X)",
+      ESP_LOGD(TAG, "[GATTC] Handles: unlock=0x%04X key=0x%04X seed=0x%04X dwrite=0x%04X dread=0x%04X",
                this->unlock_status_handle_, this->key_handle_,
-               this->seed_handle_, this->seed_properties_,
-               this->data_write_handle_,
-               this->data_read_handle_, this->data_read_properties_);
+               this->seed_handle_, this->data_write_handle_, this->data_read_handle_);
 
       this->start_authentication_();
       break;
     }
 
     case ESP_GATTC_READ_CHAR_EVT: {
-      ESP_LOGI(TAG, "[GATTC] READ_CHAR: status=%d handle=0x%04X value_len=%d",
-               param->read.status, param->read.handle, param->read.value_len);
       if (param->read.status != ESP_GATT_OK) {
-        ESP_LOGW(TAG, "[GATTC] Read FAILED: status=%d (5=INSUF_AUTH, 14=INSUF_ENC)",
-                 param->read.status);
+        ESP_LOGW(TAG, "Read failed: status=%d handle=0x%04X", param->read.status, param->read.handle);
         if (param->read.status == 5 || param->read.status == 14) {
-          ESP_LOGE(TAG, "BLE encryption required — press CONNECT on Ember panel to pair!");
+          ESP_LOGW(TAG, "Encryption required — press CONNECT on Ember panel to pair");
           this->reconnect_cooldown_until_ = millis() + 15000;
           this->disconnect_();
         }
         break;
-      }
-      // Log raw bytes
-      if (param->read.value_len > 0 && param->read.value_len <= 32) {
-        char hex[97] = {0};
-        for (int i = 0; i < param->read.value_len && i < 32; i++) {
-          snprintf(hex + i * 3, 4, "%02X ", param->read.value[i]);
-        }
-        ESP_LOGI(TAG, "[GATTC] Read data: %s", hex);
       }
       if (param->read.handle == this->unlock_status_handle_) {
         this->handle_unlock_status_read_(param->read.value, param->read.value_len);
@@ -661,21 +446,14 @@ void EmberOneControl::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
     }
 
     case ESP_GATTC_WRITE_CHAR_EVT: {
-      ESP_LOGI(TAG, "[GATTC] WRITE_CHAR: status=%d handle=0x%04X",
-               param->write.status, param->write.handle);
       if (param->write.status != ESP_GATT_OK) {
-        ESP_LOGW(TAG, "[GATTC] Write FAILED: status=%d", param->write.status);
+        ESP_LOGW(TAG, "Write failed: status=%d handle=0x%04X", param->write.status, param->write.handle);
         break;
       }
-      if (param->write.handle == this->key_handle_) {
-        if (this->auth_state_ == AuthState::UNLOCK_KEY_SENT) {
-          ESP_LOGI(TAG, "[GATTC] Unlock KEY write OK — scheduling re-read in 500ms");
-          this->unlock_reread_pending_ = true;
-          this->unlock_reread_time_ = millis();
-        } else if (this->auth_state_ == AuthState::AUTH_KEY_SENT ||
-                   this->auth_state_ == AuthState::AUTHENTICATED) {
-          ESP_LOGI(TAG, "[GATTC] Auth KEY write confirmed");
-        }
+      if (param->write.handle == this->key_handle_ &&
+          this->auth_state_ == AuthState::UNLOCK_KEY_SENT) {
+        this->unlock_reread_pending_ = true;
+        this->unlock_reread_time_ = millis();
       }
       break;
     }
@@ -691,35 +469,20 @@ void EmberOneControl::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
             this->process_decoded_frame_(this->cobs_decoder_.get_frame());
           }
         }
-      } else {
-        // Log first bytes of unknown notification
-        if (param->notify.value_len > 0) {
-          char hex[49] = {0};
-          for (int i = 0; i < param->notify.value_len && i < 16; i++) {
-            snprintf(hex + i * 3, 4, "%02X ", param->notify.value[i]);
-          }
-          ESP_LOGI(TAG, "[GATTC] Unknown notification handle=0x%04X: %s", param->notify.handle, hex);
-        }
       }
       break;
     }
 
     case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
-      ESP_LOGI(TAG, "[GATTC] REG_FOR_NOTIFY: status=%d handle=0x%04X",
-               param->reg_for_notify.status, param->reg_for_notify.handle);
       if (param->reg_for_notify.status != ESP_GATT_OK) {
-        ESP_LOGW(TAG, "[GATTC] Register for notify FAILED: status=%d", param->reg_for_notify.status);
+        ESP_LOGW(TAG, "Register for notify failed: status=%d", param->reg_for_notify.status);
         break;
       }
       if (param->reg_for_notify.handle == this->data_read_handle_) {
-        ESP_LOGI(TAG, "[GATTC] DATA_READ local registration OK — writing CCCD (properties=0x%02X)",
-                 this->data_read_properties_);
         uint16_t cccd = find_cccd_handle(this->gattc_if_, this->conn_id_, this->data_read_handle_);
         write_cccd_enable(this->gattc_if_, this->conn_id_, cccd, this->data_read_properties_);
       }
       if (param->reg_for_notify.handle == this->seed_handle_) {
-        ESP_LOGI(TAG, "[GATTC] SEED local registration OK — writing CCCD (properties=0x%02X)",
-                 this->seed_properties_);
         uint16_t cccd = find_cccd_handle(this->gattc_if_, this->conn_id_, this->seed_handle_);
         write_cccd_enable(this->gattc_if_, this->conn_id_, cccd, this->seed_properties_);
       }
@@ -727,39 +490,25 @@ void EmberOneControl::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
     }
 
     case ESP_GATTC_WRITE_DESCR_EVT: {
-      ESP_LOGI(TAG, "[GATTC] WRITE_DESCR: status=%d handle=0x%04X",
-               param->write.status, param->write.handle);
       if (param->write.status != ESP_GATT_OK) {
-        ESP_LOGW(TAG, "[GATTC] CCCD write FAILED: status=%d", param->write.status);
+        ESP_LOGW(TAG, "CCCD write failed: status=%d", param->write.status);
         break;
       }
-      // Check if this is the DATA_READ CCCD write completion
-      // Sequential flow: now subscribe to SEED after DATA_READ completes
+      // Sequential: subscribe to SEED after DATA_READ CCCD completes
       if (this->data_read_handle_ != 0 &&
           (param->write.handle == this->data_read_handle_ + 1 ||
            param->write.handle == this->data_read_handle_ + 2)) {
-        ESP_LOGI(TAG, "[GATTC] DATA_READ CCCD enabled — now subscribing to SEED...");
         if (this->seed_handle_ != 0) {
           esp_ble_gattc_register_for_notify(this->gattc_if_, this->panel_mac_, this->seed_handle_);
         }
-      }
-      // Check if this is the SEED CCCD write completion
-      if (this->seed_handle_ != 0 &&
-          (param->write.handle == this->seed_handle_ + 1 ||
-           param->write.handle == this->seed_handle_ + 2)) {
-        ESP_LOGI(TAG, "[GATTC] SEED CCCD enabled on remote device — ready for Step 2");
       }
       break;
     }
 
     case ESP_GATTC_CFG_MTU_EVT: {
-      ESP_LOGI(TAG, "[GATTC] CFG_MTU: status=%d conn_id=%d mtu=%d",
-               param->cfg_mtu.status, param->cfg_mtu.conn_id, param->cfg_mtu.mtu);
-      // MTU negotiated — now start service discovery
-      ESP_LOGI(TAG, "[GATTC] Starting service discovery after MTU negotiation...");
+      ESP_LOGD(TAG, "MTU negotiated: %d", param->cfg_mtu.mtu);
       if (this->gattc_if_ != 0) {
-        esp_err_t ret = esp_ble_gattc_search_service(this->gattc_if_, this->conn_id_, nullptr);
-        ESP_LOGI(TAG, "[GATTC] search_service returned: %s", esp_err_to_name(ret));
+        esp_ble_gattc_search_service(this->gattc_if_, this->conn_id_, nullptr);
       }
       break;
     }
@@ -797,21 +546,12 @@ void EmberOneControl::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
 // ---------------------------------------------------------------------------
 
 void EmberOneControl::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
-  ESP_LOGI(TAG, "[GAP] event=%d", (int) event);
 
   switch (event) {
     case ESP_GAP_BLE_AUTH_CMPL_EVT: {
       auto &auth = param->ble_security.auth_cmpl;
-      ESP_LOGI(TAG, "[GAP] AUTH_CMPL: success=%d addr=%02X:%02X:%02X:%02X:%02X:%02X auth_mode=%d",
-               auth.success, auth.bd_addr[0], auth.bd_addr[1], auth.bd_addr[2],
-               auth.bd_addr[3], auth.bd_addr[4], auth.bd_addr[5], auth.auth_mode);
       if (auth.success) {
-        ESP_LOGI(TAG, "[GAP] Bonding SUCCESS! auth_mode=%d", auth.auth_mode);
-        int post_bond_num = esp_ble_get_bond_device_num();
-        ESP_LOGI(TAG, "[GAP] Post-bond device count: %d", post_bond_num);
-        // Schedule backup of bond data (3s delay for Bluedroid NVS flush)
-        this->bond_backup_pending_ = true;
-        this->bond_backup_time_ = millis() + 3000;
+        ESP_LOGI(TAG, "BLE bonding successful (auth_mode=%d)", auth.auth_mode);
         // Request MTU upgrade (reference uses 185, default is 23)
         ESP_LOGI(TAG, "[GAP] Requesting MTU=185...");
         esp_ble_gattc_send_mtu_req(this->gattc_if_, this->conn_id_);
@@ -826,34 +566,24 @@ void EmberOneControl::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_ga
       }
       break;
     }
-    case ESP_GAP_BLE_SEC_REQ_EVT: {
-      ESP_LOGI(TAG, "[GAP] SEC_REQ: peer requesting security — accepting");
+    case ESP_GAP_BLE_SEC_REQ_EVT:
       esp_ble_gap_security_rsp(param->ble_security.ble_req.bd_addr, true);
       break;
-    }
-    case ESP_GAP_BLE_PASSKEY_NOTIF_EVT: {
-      ESP_LOGI(TAG, "[GAP] PASSKEY_NOTIF: passkey=%06lu",
-               (unsigned long) param->ble_security.key_notif.passkey);
+    case ESP_GAP_BLE_PASSKEY_NOTIF_EVT:
       break;
-    }
     case ESP_GAP_BLE_PASSKEY_REQ_EVT: {
-      // Gateway is requesting the BLE passkey — provide the gateway PIN
       uint32_t passkey = 0;
       for (size_t i = 0; i < this->pin_.length() && i < 6; i++) {
         passkey = passkey * 10 + (this->pin_[i] - '0');
       }
-      ESP_LOGI(TAG, "[GAP] PASSKEY_REQ: replying with gateway PIN (%06lu)", (unsigned long) passkey);
+      ESP_LOGD(TAG, "Providing passkey for pairing");
       esp_ble_passkey_reply(param->ble_security.ble_req.bd_addr, true, passkey);
       break;
     }
-    case ESP_GAP_BLE_NC_REQ_EVT: {
-      ESP_LOGI(TAG, "[GAP] NC_REQ: numeric comparison passkey=%06lu — accepting",
-               (unsigned long) param->ble_security.key_notif.passkey);
+    case ESP_GAP_BLE_NC_REQ_EVT:
       esp_ble_confirm_reply(param->ble_security.key_notif.bd_addr, true);
       break;
-    }
     default:
-      ESP_LOGD(TAG, "[GAP] Unhandled GAP event: %d", (int) event);
       break;
   }
 }
@@ -913,7 +643,7 @@ void EmberOneControl::start_authentication_() {
   // Step 1: Read UNLOCK_STATUS to get the 4-byte challenge.
   // Notifications (SEED + DATA_READ) are enabled AFTER Step 1 succeeds,
   // matching the reference HA integration auth flow.
-  ESP_LOGI(TAG, "Step 1: Reading UNLOCK_STATUS to get challenge...");
+  ESP_LOGD(TAG, "Reading UNLOCK_STATUS challenge...");
   this->set_auth_state_(AuthState::READING_UNLOCK_STATUS);
   esp_ble_gattc_read_char(this->gattc_if_, this->conn_id_, this->unlock_status_handle_,
                           ESP_GATT_AUTH_REQ_NONE);
@@ -927,15 +657,11 @@ void EmberOneControl::handle_unlock_status_read_(const uint8_t *data, size_t len
     std::string lower = text;
     for (auto &c : lower) c = tolower(c);
     if (lower.find("unlocked") != std::string::npos) {
-      ESP_LOGI(TAG, "Gateway reports UNLOCKED (text response)");
+      ESP_LOGD(TAG, "Gateway UNLOCKED");
       if (this->auth_state_ == AuthState::UNLOCK_KEY_SENT) {
-        // Step 1 complete! Now enable notifications for SEED + DATA_READ
-        ESP_LOGI(TAG, "Step 1 SUCCESS — enabling notifications for Step 2...");
         this->set_auth_state_(AuthState::WAITING_FOR_SEED);
         this->enable_data_notifications_();
       } else {
-        // Already unlocked from a previous session — enable notifications directly
-        ESP_LOGI(TAG, "Already unlocked — enabling notifications...");
         this->set_auth_state_(AuthState::WAITING_FOR_SEED);
         this->enable_data_notifications_();
       }
@@ -944,14 +670,14 @@ void EmberOneControl::handle_unlock_status_read_(const uint8_t *data, size_t len
   }
 
   if (len == 4) {
-    ESP_LOGI(TAG, "UNLOCK_STATUS 4-byte response: %02X %02X %02X %02X (auth_state=%d)",
+    ESP_LOGD(TAG, "UNLOCK_STATUS: %02X%02X%02X%02X (state=%d)",
              data[0], data[1], data[2], data[3], (int) this->auth_state_);
 
     bool all_zeros = (data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 0);
 
     if (all_zeros) {
       // All zeros = gateway not ready (per reference implementation)
-      ESP_LOGW(TAG, "UNLOCK_STATUS all zeros — gateway not ready (state=%d)", (int) this->auth_state_);
+      ESP_LOGD(TAG, "UNLOCK_STATUS all zeros — not ready");
       return;
     }
 
@@ -961,9 +687,7 @@ void EmberOneControl::handle_unlock_status_read_(const uint8_t *data, size_t len
       uint8_t response[4];
       calculate_unlock_response(data, response);
 
-      ESP_LOGI(TAG, "Step 1: Challenge=%02X%02X%02X%02X → Response=%02X%02X%02X%02X",
-               data[0], data[1], data[2], data[3],
-               response[0], response[1], response[2], response[3]);
+      ESP_LOGD(TAG, "Sending unlock response");
 
       this->set_auth_state_(AuthState::UNLOCK_KEY_SENT);
       esp_ble_gattc_write_char(this->gattc_if_, this->conn_id_, this->key_handle_,
@@ -982,9 +706,9 @@ void EmberOneControl::handle_unlock_status_read_(const uint8_t *data, size_t len
       return;
     }
 
-    ESP_LOGI(TAG, "UNLOCK_STATUS response in state %d — ignoring", (int) this->auth_state_);
+    ESP_LOGD(TAG, "UNLOCK_STATUS in state %d — ignoring", (int) this->auth_state_);
   } else {
-    ESP_LOGI(TAG, "UNLOCK_STATUS response: %d bytes (unexpected size)", (int) len);
+    ESP_LOGD(TAG, "UNLOCK_STATUS: %d bytes (unexpected)", (int) len);
   }
 }
 
@@ -994,19 +718,15 @@ void EmberOneControl::handle_seed_notification_(const uint8_t *data, size_t len)
     return;
   }
 
-  ESP_LOGI(TAG, "Received SEED: %02X %02X %02X %02X", data[0], data[1], data[2], data[3]);
+  ESP_LOGD(TAG, "Received SEED notification");
 
   // Build 16-byte auth key from seed using Step 2 cipher (little-endian)
   build_auth_key(data, this->pin_, STEP2_CIPHER, this->auth_key_);
 
-  ESP_LOGI(TAG, "Step 2: Writing 16-byte auth key to KEY characteristic...");
   this->set_auth_state_(AuthState::AUTH_KEY_SENT);
   esp_ble_gattc_write_char(this->gattc_if_, this->conn_id_, this->key_handle_,
                            16, this->auth_key_, ESP_GATT_WRITE_TYPE_NO_RSP, ESP_GATT_AUTH_REQ_NONE);
-
-  // Auth key is accepted silently — notifications are already enabled from Step 1.
-  // Data events should start flowing now.
-  ESP_LOGI(TAG, "Step 2: Auth key sent — authentication complete!");
+  ESP_LOGI(TAG, "Authentication complete");
   this->set_auth_state_(AuthState::AUTHENTICATED);
   // Metadata request is triggered by the gateway info handler after first GetDevices heartbeat
 }
@@ -1016,10 +736,8 @@ void EmberOneControl::enable_data_notifications_() {
   // This matches the reference implementation which awaits each start_notify() call.
   // SEED subscription is triggered by DATA_READ's WRITE_DESCR completion event.
   if (this->data_read_handle_ != 0) {
-    ESP_LOGI(TAG, "Enabling DATA_READ notifications (SEED will follow after CCCD write)...");
     esp_ble_gattc_register_for_notify(this->gattc_if_, this->panel_mac_, this->data_read_handle_);
   } else {
-    ESP_LOGW(TAG, "DATA_READ characteristic not found — subscribing to SEED directly");
     if (this->seed_handle_ != 0) {
       esp_ble_gattc_register_for_notify(this->gattc_if_, this->panel_mac_, this->seed_handle_);
     }
@@ -1169,7 +887,7 @@ void EmberOneControl::process_decoded_frame_(const std::vector<uint8_t> &frame) 
 void EmberOneControl::handle_gateway_info_(const uint8_t *data, size_t len) {
   if (len < 5) return;
   this->device_table_id_ = data[4];
-  ESP_LOGI(TAG, "Gateway info: tableId=0x%02X, devices=%d", data[4], data[3]);
+  ESP_LOGD(TAG, "Gateway info: tableId=0x%02X, devices=%d", data[4], data[3]);
 }
 
 void EmberOneControl::handle_relay_status_(const uint8_t *data, size_t len) {
@@ -1267,8 +985,7 @@ void EmberOneControl::handle_command_response_(const uint8_t *data, size_t len) 
     // Don't trigger another GetDevices here — the 5s heartbeat will naturally
     // deliver fresh state now that metadata_received_ is true and
     // resolve_address() can match callbacks.
-    ESP_LOGI(TAG, "Metadata fetch complete (%d function names mapped)",
-             this->function_name_map_.size());
+    ESP_LOGD(TAG, "Metadata complete (%d functions)", this->function_name_map_.size());
     return;
   }
   if (resp_type != 0x01) {
@@ -1280,7 +997,7 @@ void EmberOneControl::handle_command_response_(const uint8_t *data, size_t len) 
   uint8_t start_id = data[5];
   uint8_t count = data[6];
 
-  ESP_LOGI(TAG, "Metadata response: table=0x%02X start=%d count=%d (%d bytes)", table_id, start_id, count, len);
+  ESP_LOGD(TAG, "Metadata: table=0x%02X start=%d count=%d", table_id, start_id, count);
 
   size_t offset = 7;
   int index = 0;
@@ -1305,12 +1022,12 @@ void EmberOneControl::handle_command_response_(const uint8_t *data, size_t len) 
       uint8_t capability = data[offset + 5];
 
       this->function_name_map_[func_name] = device_addr;
-      ESP_LOGI(TAG, "  [%d:0x%02X] func=%d inst=%d cap=0x%02X → addr=0x%04X",
-               table_id, device_id, func_name, func_instance, capability, device_addr);
+      ESP_LOGD(TAG, "  [%d:0x%02X] func=%d → addr=0x%04X",
+               table_id, device_id, func_name, device_addr);
     } else if (protocol == 1 && payload_size == 0) {
       // Host/Gateway proxy — default function 323 (Gateway RVLink)
       this->function_name_map_[FUNC_GATEWAY_RVLINK] = device_addr;
-      ESP_LOGI(TAG, "  [%d:0x%02X] Gateway (host default) → addr=0x%04X", table_id, device_id, device_addr);
+      ESP_LOGD(TAG, "  [%d:0x%02X] Gateway → addr=0x%04X", table_id, device_id, device_addr);
     } else {
       ESP_LOGD(TAG, "  [%d:0x%02X] skipped: proto=%d payload=%d", table_id, device_id, protocol, payload_size);
     }
@@ -1321,7 +1038,7 @@ void EmberOneControl::handle_command_response_(const uint8_t *data, size_t len) 
 
   if (!this->function_name_map_.empty()) {
     this->metadata_received_ = true;
-    ESP_LOGI(TAG, "Metadata: %d function names resolved", this->function_name_map_.size());
+    ESP_LOGD(TAG, "Metadata: %d functions resolved", this->function_name_map_.size());
   }
 }
 

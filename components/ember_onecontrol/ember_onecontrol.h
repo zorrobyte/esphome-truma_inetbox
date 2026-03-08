@@ -16,8 +16,6 @@
 #include <esp_gattc_api.h>
 #include <esp_bt_defs.h>
 #include <esp_gap_ble_api.h>
-#include <nvs_flash.h>
-#include <nvs.h>
 #endif
 
 namespace esphome {
@@ -164,8 +162,6 @@ class EmberOneControl : public PollingComponent,
 
   // Reconnect backoff
   uint32_t reconnect_cooldown_until_{0};
-  bool bond_backup_pending_{false};
-  uint32_t bond_backup_time_{0};
 
   // Heartbeat timer (GetDevices every 5s to keep connection alive)
   uint32_t last_heartbeat_time_{0};
