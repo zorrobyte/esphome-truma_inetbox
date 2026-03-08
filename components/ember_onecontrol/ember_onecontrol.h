@@ -4,6 +4,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/preferences.h"
 #include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
+#include "esphome/components/esp32_ble/ble.h"
 #include "ember_protocol.h"
 
 #include <vector>
@@ -19,8 +20,9 @@
 namespace esphome {
 namespace ember_onecontrol {
 
-static const uint16_t LIPPERT_MANUFACTURER_ID = 0x0499;
+static const uint16_t LIPPERT_MANUFACTURER_ID = 0x05C7;  // LCI Industries (Lippert)
 static const uint32_t PAIRING_TIMEOUT_MS = 60000;
+static const uint8_t EMBER_GATTC_APP_ID = 0xFE;  // Unique app ID to avoid conflicts
 
 enum class AuthState : uint8_t {
   DISCONNECTED,
@@ -48,7 +50,10 @@ struct SavedPanelConfig {
   bool valid;
 } __attribute__((packed));
 
-class EmberOneControl : public PollingComponent, public esp32_ble_tracker::ESPBTDeviceListener {
+class EmberOneControl : public PollingComponent,
+                        public esp32_ble_tracker::ESPBTDeviceListener,
+                        public esp32_ble::GATTcEventHandler,
+                        public esp32_ble::GAPEventHandler {
  public:
   void setup() override;
   void loop() override;
@@ -81,14 +86,15 @@ class EmberOneControl : public PollingComponent, public esp32_ble_tracker::ESPBT
   float get_battery_voltage() const { return this->battery_voltage_; }
   const std::string &get_battery_status() const { return this->battery_status_; }
 
+  // GATTcEventHandler interface — receives GATTC events from ESPHome's BLE stack
+  void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
+                            esp_ble_gattc_cb_param_t *param) override;
+
+  // GAPEventHandler interface — receives GAP events (security/bonding)
+  void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) override;
+
  protected:
   void set_auth_state_(AuthState state);
-
-  // GATT client management
-  static void gattc_event_handler_static_(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
-                                           esp_ble_gattc_cb_param_t *param);
-  void gattc_event_handler_(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
-                             esp_ble_gattc_cb_param_t *param);
   void connect_to_device_(const esp_bd_addr_t addr);
   void disconnect_();
 
@@ -97,6 +103,7 @@ class EmberOneControl : public PollingComponent, public esp32_ble_tracker::ESPBT
   void handle_unlock_status_read_(const uint8_t *data, size_t len);
   void handle_seed_notification_(const uint8_t *data, size_t len);
   void enable_data_notifications_();
+  void send_get_devices_();
   void send_get_devices_metadata_();
 
   // Event processing
@@ -113,7 +120,7 @@ class EmberOneControl : public PollingComponent, public esp32_ble_tracker::ESPBT
   void save_mac_to_nvs_(const uint8_t *mac);
   bool load_mac_from_nvs_(uint8_t *mac);
 
-  std::string pin_{"090336"};
+  std::string pin_{"357694"};
   AuthState auth_state_{AuthState::DISCONNECTED};
 
   // Pairing state
@@ -128,6 +135,7 @@ class EmberOneControl : public PollingComponent, public esp32_ble_tracker::ESPBT
   esp_gatt_if_t gattc_if_{0};
   uint16_t conn_id_{0};
   bool gattc_registered_{false};
+  bool gattc_app_registered_{false};
 
   // BLE handles
   uint16_t unlock_status_handle_{0};
@@ -136,9 +144,20 @@ class EmberOneControl : public PollingComponent, public esp32_ble_tracker::ESPBT
   uint16_t data_write_handle_{0};
   uint16_t data_read_handle_{0};
 
+  // Characteristic properties (for auto-detecting notify vs indicate)
+  uint8_t seed_properties_{0};
+  uint8_t data_read_properties_{0};
+
   // Delayed unlock re-read timer
   bool unlock_reread_pending_{false};
   uint32_t unlock_reread_time_{0};
+
+  // Reconnect backoff
+  uint32_t reconnect_cooldown_until_{0};
+
+  // Heartbeat timer (GetDevices every 5s to keep connection alive)
+  uint32_t last_heartbeat_time_{0};
+  static const uint32_t HEARTBEAT_INTERVAL_MS = 5000;
 
   // Protocol state
   CobsByteDecoder cobs_decoder_;
@@ -159,9 +178,6 @@ class EmberOneControl : public PollingComponent, public esp32_ble_tracker::ESPBT
   std::vector<TankCallback> tank_callbacks_;
   std::vector<HBridgeCallback> hbridge_callbacks_;
   std::vector<AuthStateCallback> auth_state_callbacks_;
-
-  // Static instance pointer for GATT callback routing
-  static EmberOneControl *instance_;
 };
 
 }  // namespace ember_onecontrol
