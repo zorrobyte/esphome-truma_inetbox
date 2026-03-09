@@ -119,13 +119,8 @@ truma_inetbox:
       - logger.log: "Message from CP Plus received."
 
 # ---------------------------------------------------------
-# EMBER ONECONTROL (BLE)
+# EMBER ONECONTROL (BLE via NimBLE — no esp32_ble/tracker)
 # ---------------------------------------------------------
-esp32_ble:
-  io_capability: keyboard_display
-
-esp32_ble_tracker:
-
 ember_onecontrol:
   pin: "357694"
 
