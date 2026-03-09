@@ -27,7 +27,7 @@ The Ember OneControl component is based on reverse engineering of the [ha-onecon
 - Battery voltage and status monitoring
 
 ### Board
-- **ESP32-S3** recommended (ESP32S3_CAN_LIN_rev_B board with LIN transceiver for Truma)
+- **[ESP32-S3 CAN/LIN Bus Board](https://copperhilltech.com/esp32s3-can-lin-bus-board/)** recommended (has built-in LIN transceiver for Truma)
 - Any ESP32 with BLE works for Ember-only setups
 
 ## Quick Start
