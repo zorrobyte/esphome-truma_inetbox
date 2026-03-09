@@ -174,9 +174,11 @@ switch:
     type: WATER_PUMP
 ```
 
-Available types: `WATER_PUMP`, `SLIDE`, `AWNING`
+Available types: `WATER_PUMP`
 
-#### Binary Sensors
+#### Slide & Awning (H-Bridge)
+
+The slide and awning are H-Bridge devices that require continuous button presses — hold to move, release to stop. They are not simple on/off switches.
 
 ```yaml
 binary_sensor:
@@ -282,6 +284,7 @@ Edit `DEVICE_HOST`, `DEVICE_PORT`, and `NOISE_PSK` at the top of `test_harness.p
 - [ ] Testing of Combi 4E / Combi 6E and Alde devices
 - [ ] VarioHeat testing
 - [ ] Ember: dimming support for compatible lights
+- [ ] Ember: slide/awning H-Bridge cover controls (hold-to-move)
 - [ ] Ember: additional device types (generators, leveling jacks)
 - [x] Combi 6 D E full end-to-end testing (97/97 pass)
 - [x] Aircon (Aventa Eco) testing
