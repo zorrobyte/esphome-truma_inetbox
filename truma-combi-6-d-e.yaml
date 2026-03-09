@@ -1,22 +1,17 @@
 esphome:
-  name: truma
+  name: rv-controller
+  friendly_name: "RV Controller"
 
 esp32:
   board: esp32-s3-devkitc-1
   framework:
-    type: arduino
+    type: esp-idf
 
 external_components:
   - source:
       type: local
       path: components
-    components: ["truma_inetbox", "uart"]
-  # - source:
-  #     type: git
-  #     url: https://github.com/simplenotezy/esphome-truma_inetbox
-  #     ref: feat/arduino_3
-  #   components: ["truma_inetbox"]
-  #   refresh: 0s
+    components: ["truma_inetbox", "uart", "ember_onecontrol"]
 
 # ---------------------------------------------------------
 # NETWORK SECTION
@@ -124,7 +119,13 @@ truma_inetbox:
       - logger.log: "Message from CP Plus received."
 
 # ---------------------------------------------------------
-# Devices/entites
+# EMBER ONECONTROL (BLE via NimBLE — no esp32_ble/tracker)
+# ---------------------------------------------------------
+ember_onecontrol:
+  pin: "357694"
+
+# ---------------------------------------------------------
+# Devices/entities
 # ---------------------------------------------------------
 
 number:
@@ -135,7 +136,30 @@ number:
     name: "Target Water Temperature"
     type: TARGET_WATER_TEMPERATURE
 
+# Ember pairing button + device restart
+button:
+  - platform: ember_onecontrol
+    name: "Ember Start Pairing"
+  - platform: restart
+    name: "Restart Device"
+
+# Ember lights
+light:
+  - platform: ember_onecontrol
+    name: "Ceiling Light"
+    type: CEILING_LIGHT
+  - platform: ember_onecontrol
+    name: "Accent Light"
+    type: ACCENT_LIGHT
+  - platform: ember_onecontrol
+    name: "Step Light"
+    type: STEP_LIGHT
+  - platform: ember_onecontrol
+    name: "Awning Light"
+    type: AWNING_LIGHT
+
 binary_sensor:
+  # Truma
   - platform: truma_inetbox
     name: "CP Plus alive"
     type: CP_PLUS_CONNECTED
@@ -166,6 +190,14 @@ binary_sensor:
   - platform: truma_inetbox
     name: "Timer Water Heater active"
     type: TIMER_WATER
+
+  # Ember
+  - platform: ember_onecontrol
+    name: "Slide State"
+    type: SLIDE_STATE
+  - platform: ember_onecontrol
+    name: "Awning State"
+    type: AWNING_STATE
 
 climate:
   - platform: truma_inetbox
@@ -240,7 +272,30 @@ sensor:
     name: "Aircon Vent Mode"
     type: AIRCON_VENT_MODE
 
+  # Ember sensors
+  - platform: ember_onecontrol
+    name: "Battery Voltage"
+    type: BATTERY_VOLTAGE
+  - platform: ember_onecontrol
+    name: "Fresh Tank"
+    type: TANK_FRESH
+  - platform: ember_onecontrol
+    name: "Black Tank"
+    type: TANK_BLACK
+  - platform: ember_onecontrol
+    name: "Grey Tank"
+    type: TANK_GREY
+
 text_sensor:
+  # Ember
+  - platform: ember_onecontrol
+    name: "Battery Status"
+    type: BATTERY_STATUS
+  - platform: ember_onecontrol
+    name: "Ember Connection Status"
+    type: CONNECTION_STATUS
+
+  # Truma
   - platform: template
     name: "Heater Energy Mode"
     update_interval: 5s
@@ -295,6 +350,18 @@ text_sensor:
       }
 
 switch:
+  # Ember
+  - platform: ember_onecontrol
+    name: "Water Pump"
+    type: WATER_PUMP
+  - platform: ember_onecontrol
+    name: "Slide"
+    type: SLIDE
+  - platform: ember_onecontrol
+    name: "Awning"
+    type: AWNING
+
+  # Truma
   - platform: template
     name: "Activate Room Heater"
     lambda: |-

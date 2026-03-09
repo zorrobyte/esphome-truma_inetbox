@@ -1,0 +1,120 @@
+# Ember RV OneControl BLE Integration
+#
+# Setup:
+# 1. Flash this config to an ESP32
+# 2. In Home Assistant, press the "Start Pairing" button
+# 3. Within 60 seconds, hold CONNECT on your Ember panel until it flashes
+# 4. The ESP32 will auto-discover, pair, and authenticate
+# 5. Entities appear in HA. Pairing is saved — survives reboots.
+#
+# To re-pair (e.g., different panel): press "Start Pairing" again.
+
+esphome:
+  name: ember-rv-controller
+  friendly_name: "Ember RV Controller"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: DEBUG
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Ember-RV-Fallback"
+    password: !secret fallback_password
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+
+# BLE scanner (required for auto-discovery)
+esp32_ble_tracker:
+
+# OneControl hub — no MAC address needed!
+ember_onecontrol:
+  pin: "090336"
+
+# Pairing button — press in HA to start 60s discovery window
+button:
+  - platform: ember_onecontrol
+    name: "Start Pairing"
+
+# Lights (toggle-only, no dimming)
+light:
+  - platform: ember_onecontrol
+    name: "Ceiling Light"
+    type: CEILING_LIGHT
+
+  - platform: ember_onecontrol
+    name: "Accent Light"
+    type: ACCENT_LIGHT
+
+  - platform: ember_onecontrol
+    name: "Step Light"
+    type: STEP_LIGHT
+
+  - platform: ember_onecontrol
+    name: "Pump Light"
+    type: PUMP_LIGHT
+
+  - platform: ember_onecontrol
+    name: "Awning Light"
+    type: AWNING_LIGHT
+
+# Switches
+switch:
+  - platform: ember_onecontrol
+    name: "Water Pump"
+    type: WATER_PUMP
+
+# Sensors
+sensor:
+  - platform: ember_onecontrol
+    name: "Battery Voltage"
+    type: BATTERY_VOLTAGE
+
+  - platform: ember_onecontrol
+    name: "Fresh Tank"
+    type: TANK_FRESH
+
+  - platform: ember_onecontrol
+    name: "Black Tank"
+    type: TANK_BLACK
+
+  - platform: ember_onecontrol
+    name: "Grey Tank"
+    type: TANK_GREY
+
+# Binary Sensors (read-only for safety)
+binary_sensor:
+  - platform: ember_onecontrol
+    name: "Slide State"
+    type: SLIDE_STATE
+
+  - platform: ember_onecontrol
+    name: "Awning State"
+    type: AWNING_STATE
+
+# Text Sensors
+text_sensor:
+  - platform: ember_onecontrol
+    name: "Battery Status"
+    type: BATTERY_STATUS
+
+  - platform: ember_onecontrol
+    name: "Connection Status"
+    type: CONNECTION_STATUS

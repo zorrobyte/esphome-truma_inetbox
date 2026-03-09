@@ -34,9 +34,9 @@ from aioesphomeapi import (
 )
 
 # ───────────────────────── Device Under Test ─────────────────────────
-DEVICE_HOST = "YOUR_DEVICE_IP"       # e.g. "192.168.4.29"
+DEVICE_HOST = "192.168.4.29"
 DEVICE_PORT = 6053
-NOISE_PSK = "YOUR_NOISE_PSK"         # from secrets.yaml api_encryption_key
+NOISE_PSK = "d0lhdr+FCp0h2g7/KrPFIqQXxEpzmJbvhm8imsBqPjA="
 
 # ───────────────────────── Expected entity counts ─────────────────────
 EXPECTED_COUNTS = {

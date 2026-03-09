@@ -2,9 +2,9 @@
 import asyncio, time
 from aioesphomeapi import APIClient, ClimateMode, ClimateFanMode, SelectInfo, SensorInfo, BinarySensorInfo, ClimateInfo, SwitchInfo
 
-HOST = "YOUR_DEVICE_IP"       # e.g. "192.168.4.29"
+HOST = "192.168.4.29"
 PORT = 6053
-PSK = "YOUR_NOISE_PSK"        # from secrets.yaml api_encryption_key
+PSK = "d0lhdr+FCp0h2g7/KrPFIqQXxEpzmJbvhm8imsBqPjA="
 
 states = {}
 infos = {}
