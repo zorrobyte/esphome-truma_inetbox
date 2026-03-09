@@ -37,7 +37,6 @@ The Ember OneControl component is based on reverse engineering of the [ha-onecon
 ```yaml
 external_components:
   - source: github://zorrobyte/esphome-truma_inetbox
-    ref: feature/ember-onecontrol
     components: ["truma_inetbox", "ember_onecontrol"]
 ```
 
@@ -82,12 +81,6 @@ esp32:
   framework:
     type: esp-idf
 
-# Required: set keyboard_display for BLE bonding persistence
-esp32_ble:
-  io_capability: keyboard_display
-
-esp32_ble_tracker:
-
 ember_onecontrol:
   pin: "357694"  # 6-digit PIN from your OneControl gateway sticker
 
@@ -125,8 +118,6 @@ See [truma-combi-6-d-e.yaml](/truma-combi-6-d-e.yaml) for a complete example wit
 6. Pairing completes automatically — the LED goes solid
 
 After initial pairing, the bond persists across reboots and OTA updates. You should never need to press CONNECT again.
-
-**Important:** The `esp32_ble: io_capability: keyboard_display` setting is required for bond persistence. Without it, Bluedroid strips bond keys on reboot.
 
 ### Entities
 
@@ -201,9 +192,11 @@ Available types: `SLIDE_STATE`, `AWNING_STATE`
 
 ### How It Works
 
-The component connects to the OneControl panel over BLE using Secure Connections with MITM protection (passkey-based). After bonding, it performs a TEA-encrypted challenge-response unlock, then subscribes to data notifications. Device metadata is fetched automatically to map function names to device addresses — no hardcoded device IDs needed.
+The component uses the NimBLE BLE stack directly (bypassing ESPHome's Bluedroid abstractions) to connect to the OneControl panel. It uses Secure Connections with MITM protection (passkey-based) and stores bond keys in NVS for persistence across reboots. After bonding, it performs a TEA-encrypted challenge-response unlock, then subscribes to data notifications. Device metadata is fetched automatically to map function names to device addresses — no hardcoded device IDs needed.
 
-The protocol uses COBS-encoded frames over BLE GATT characteristics. A 5-second heartbeat polls for device state updates.
+The protocol uses COBS-encoded frames over BLE GATT characteristics with a negotiated 247-byte MTU. A 5-second heartbeat polls for device state updates.
+
+No `esp32_ble` or `esp32_ble_tracker` components are needed — the Ember component manages its own BLE stack.
 
 ## Truma iNetBox
 
